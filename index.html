@@ -56,6 +56,7 @@ window.addEventListener('unhandledrejection', function (e) {
     <button id="start-login" class="login-btn">🔑 Login (members)</button>
     <button id="start-guest">🎫 Play as guest</button>
   </div>
+  <div id="member-badge" class="member-badge" style="display:none"></div>
   <div class="mode-btns">
     <button id="start-hotseat">👥 2 Players (hotseat)</button>
     <button id="start-ai">🤖 Play vs AI</button>
@@ -100,6 +101,22 @@ window.addEventListener('unhandledrejection', function (e) {
   <div class="modal zoom-modal">
     <button id="zoom-close" class="x">✕</button>
     <img id="zoom-img" src="" alt="card zoom">
+  </div>
+</div>
+
+<div id="auth-modal" style="display:none">
+  <div class="modal auth-modal">
+    <button id="auth-close" class="x">✕</button>
+    <h2 id="auth-title">🔑 Member sign in</h2>
+    <p class="auth-sub" id="auth-sub">Sign in with your MYTHOS member account.</p>
+    <label for="auth-email">Email</label>
+    <input id="auth-email" type="email" autocomplete="email" placeholder="you@example.com">
+    <label for="auth-pass">Password</label>
+    <input id="auth-pass" type="password" autocomplete="current-password" placeholder="••••••••">
+    <div id="auth-error" class="auth-error" style="display:none"></div>
+    <button id="auth-submit" class="auth-submit">Sign in</button>
+    <p class="auth-switch"><a id="auth-toggle" href="#">Create a new account</a></p>
+    <p class="auth-alt"><a id="auth-guest" href="#">Continue as guest</a> · <a id="auth-wix" href="#" target="_blank" rel="noopener">Get membership</a></p>
   </div>
 </div>
 

@@ -57,10 +57,18 @@ function boot() {
   el('start-hotseat').onclick = function () { mode = 'hotseat'; isGuest = false; newMatch(); };
   el('start-ai').onclick = function () { mode = 'ai'; isGuest = false; newMatch(); };
   el('start-guest').onclick = function () { mode = 'ai'; isGuest = true; newMatch(); }; // guest: default deck vs AI
-  el('start-login').onclick = function () { location.href = WIX_LOGIN_URL; };
+  el('start-login').onclick = function () { openAuthModal(); };
   el('start-report').onclick = function () { reportIssue('start screen'); };
   var lr = el('loader-report');
   if (lr) lr.onclick = function () { reportIssue('loader error'); };
+  // auth modal wiring
+  el('auth-close').onclick = closeAuthModal;
+  el('auth-submit').onclick = submitAuth;
+  el('auth-toggle').onclick = function (e) { e.preventDefault(); authMode = (authMode === 'signin') ? 'signup' : 'signin'; syncAuthModal(); authErr(''); };
+  el('auth-guest').onclick = function (e) { e.preventDefault(); closeAuthModal(); };
+  el('auth-email').onkeydown = function (e) { if (e.key === 'Enter') submitAuth(); };
+  el('auth-pass').onkeydown = function (e) { if (e.key === 'Enter') submitAuth(); };
+  if (window.MYTHOS_FIREBASE) window.MYTHOS_FIREBASE.onReady(refreshMemberBadge);
   hideLoader();
 }
 function newMatch() {
@@ -78,6 +86,94 @@ function newMatch() {
 function renderStart() {
   el('deck-a-name').textContent = DATA.decks.cult.name;
   el('deck-b-name').textContent = DATA.decks.board.name;
+  refreshMemberBadge();
+}
+
+/* ---------------- member auth modal + badge ---------------- */
+var authMode = 'signin'; // 'signin' | 'signup'
+
+function openAuthModal() {
+  authMode = 'signin';
+  el('auth-email').value = '';
+  el('auth-pass').value = '';
+  el('auth-wix').href = WIX_LOGIN_URL;
+  authErr('');
+  syncAuthModal();
+  el('auth-modal').style.display = 'block';
+  setTimeout(function () { el('auth-email').focus(); }, 50);
+}
+function closeAuthModal() { el('auth-modal').style.display = 'none'; }
+function syncAuthModal() {
+  el('auth-title').textContent = authMode === 'signin' ? '🔑 Member sign in' : '📝 Create account';
+  el('auth-sub') && (el('auth-sub').textContent = authMode === 'signin'
+    ? 'Sign in with your MYTHOS member account.'
+    : 'Create a free MYTHOS account. Membership tiers are added after purchase.');
+  el('auth-submit').textContent = authMode === 'signin' ? 'Sign in' : 'Create account';
+  el('auth-toggle').textContent = authMode === 'signin' ? 'Create a new account' : 'Already have an account? Sign in';
+}
+function authErr(msg) {
+  var d = el('auth-error');
+  if (msg) { d.textContent = msg; d.style.display = 'block'; }
+  else { d.style.display = 'none'; d.textContent = ''; }
+}
+function friendlyAuthError(err) {
+  var code = (err && err.code) || '';
+  var map = {
+    'auth/user-not-found': 'No account found for that email.',
+    'auth/wrong-password': 'Wrong password.',
+    'auth/invalid-credential': 'Wrong email or password.',
+    'auth/invalid-email': 'That email address looks invalid.',
+    'auth/email-already-in-use': 'That email is already registered — sign in instead.',
+    'auth/weak-password': 'Password must be at least 6 characters.',
+    'auth/operation-not-allowed': 'Email sign-in is not enabled yet. Play as guest for now.',
+    'auth/too-many-requests': 'Too many attempts — try again later.',
+    'auth/network-request-failed': 'Network error. Check your connection.'
+  };
+  return map[code] || (err && err.message) || 'Sign-in failed.';
+}
+function submitAuth() {
+  var FB = window.MYTHOS_FIREBASE;
+  if (!FB || !FB.isOnline()) { authErr('Not connected to the server. Check your connection and try again.'); return; }
+  var email = el('auth-email').value.trim();
+  var pw = el('auth-pass').value;
+  if (!email || !pw) { authErr('Enter your email and password.'); return; }
+  el('auth-submit').disabled = true;
+  var p = authMode === 'signin' ? FB.signInEmail(email, pw) : FB.signUpEmail(email, pw);
+  p.then(function () {
+    el('auth-submit').disabled = false;
+    closeAuthModal();
+    refreshMemberBadge();
+  }, function (err) {
+    el('auth-submit').disabled = false;
+    authErr(friendlyAuthError(err));
+  });
+}
+
+function memberBadgeHTML() {
+  var FB = window.MYTHOS_FIREBASE;
+  if (!FB || !FB.isOnline()) return '';
+  if (FB.isMember()) {
+    var t = String(FB.getProfile().memberTier).toUpperCase();
+    return '👑 Membership: <b>' + esc(t) + '</b> · <a id="badge-signout" href="#">Sign out</a>';
+  }
+  if (!FB.isAnonymous()) return 'Signed in (free account) · <a id="badge-signout" href="#">Sign out</a>';
+  return 'Guest';
+}
+function refreshMemberBadge() {
+  var b = el('member-badge');
+  if (!b) return;
+  var h = memberBadgeHTML();
+  if (h) { b.innerHTML = h; b.style.display = 'block'; bindBadgeSignout(b); }
+  else { b.style.display = 'none'; b.innerHTML = ''; }
+  var chip = el('member-chip');
+  if (chip) { chip.innerHTML = h || 'Guest'; bindBadgeSignout(chip); }
+}
+function bindBadgeSignout(root) {
+  var s = root.querySelector('#badge-signout');
+  if (s) s.onclick = function (e) {
+    e.preventDefault();
+    window.MYTHOS_FIREBASE.signOut().then(function () { refreshMemberBadge(); });
+  };
 }
 
 function renderSetup() {
@@ -124,6 +220,7 @@ function renderBoard() {
   var me = S.active, foe = 1 - S.active;
   var h = '';
   h += '<div id="topbar"><span class="game-title">MYTHOS</span>' +
+    '<span id="member-chip" class="member-chip"></span>' +
     '<span class="turn-info">Turn ' + S.turn + ' · ' + esc(S.players[me].name) + ' · <b>' + phaseLabel() + '</b></span>' +
     '<span class="topbtns"><button id="btn-log">Log</button><button id="btn-restart">Restart</button>' +
     '<button id="btn-next">Next phase →</button></span></div>';
@@ -137,6 +234,7 @@ function renderBoard() {
   el('btn-next').onclick = onNextPhase;
   bindBoard();
   bindCardZoom();
+  refreshMemberBadge();
 }
 
 function phaseBanner() {
@@ -799,4 +897,13 @@ document.addEventListener('DOMContentLoaded', function () {
     } else if (!need && btn) btn.remove();
   }, 400);
 });
+
+/* test hooks (browser testing) */
+window.MYTHOS_TEST = {
+  signInEmail: function (e, p) { return window.MYTHOS_FIREBASE.signInEmail(e, p); },
+  signUpEmail: function (e, p) { return window.MYTHOS_FIREBASE.signUpEmail(e, p); },
+  signOut: function () { return window.MYTHOS_FIREBASE.signOut(); },
+  getProfile: function () { return window.MYTHOS_FIREBASE.getProfile(); },
+  isMember: function () { return window.MYTHOS_FIREBASE.isMember(); }
+};
 })();

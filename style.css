@@ -241,3 +241,39 @@ img.facedown { filter: brightness(.95); }
   box-shadow: 2px 2px 0 #1c1c24, 4px 4px 0 #14141a;
 }
 .dpile-count { color: var(--dim); font-size: 13px; }
+
+/* ---- member auth modal ---- */
+#auth-modal {
+  position: fixed; inset: 0; background: rgba(0,0,0,.78); z-index: 80;
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+.auth-modal { flex-direction: column; align-items: stretch; max-width: 380px; width: 100%; gap: 8px; }
+.auth-modal h2 { margin: 0 24px 0 0; color: var(--gold); font-size: 20px; }
+.auth-sub { color: var(--dim); font-size: 14px; margin: 0; }
+.auth-modal label { font-size: 12px; letter-spacing: 2px; text-transform: uppercase; color: var(--dim); margin-top: 6px; }
+.auth-modal input {
+  width: 100%; padding: 12px; border-radius: 6px; font-size: 16px;
+  border: 1px solid #3a3a48; background: #0a0a0f; color: #e8e4d8;
+}
+.auth-modal input:focus { outline: none; border-color: var(--gold); }
+.auth-submit {
+  margin-top: 10px; padding: 14px; border: none; border-radius: 6px;
+  background: var(--gold); color: #0a0a0f; font-size: 16px; font-weight: bold;
+  cursor: pointer; min-height: 48px;
+}
+.auth-submit:hover { background: #ddb93c; }
+.auth-submit:disabled { opacity: .5; cursor: wait; }
+.auth-error { color: #ff9090; font-size: 14px; background: rgba(255,80,80,.08); border: 1px solid #5a2a2a; border-radius: 6px; padding: 10px; }
+.auth-switch, .auth-alt { text-align: center; font-size: 14px; margin: 4px 0 0; }
+.auth-switch a, .auth-alt a, .member-badge a, .member-chip a { color: var(--gold); }
+/* ---- membership badge / chip ---- */
+.member-badge {
+  text-align: center; margin: 10px auto 0; padding: 10px 16px;
+  border: 1px solid var(--gold); border-radius: 8px; max-width: 420px;
+  background: rgba(201,162,39,.07); font-size: 15px;
+}
+.member-chip {
+  font-size: 12px; color: var(--gold); border: 1px solid var(--gold);
+  border-radius: 20px; padding: 3px 10px; margin-left: 10px; white-space: nowrap;
+}
+@media (max-width: 480px) { .member-chip { display: none; } }
