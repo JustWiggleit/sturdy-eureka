@@ -15,7 +15,6 @@ var selHand = null;           // selected hand card uid
 var targeting = null;         // {kind, uid, spec, extra}
 var blockSel = null;          // blocker uid picked, awaiting attacker click
 var discardMode = false;
-var declaringDone = false;    // hotseat: attacker finished declaring
 var logOpen = false;
 var flipped = {};             // uid -> true: card is showing its back (persists across re-renders)
 
@@ -72,6 +71,7 @@ function newMatch() {
   el('start-screen').style.display = 'none';
   el('game-screen').style.display = 'block';
   renderSetup();
+  showFlipHintOnce();
 }
 
 /* ---------------- start / setup screens ---------------- */
@@ -94,7 +94,7 @@ function renderSetup() {
     // never sees or confirms the AI's hand. Hotseat still shows both.
     if (p === 0 && mode === 'hotseat') renderSetup2(); else { E.startGame(S); refresh(); }
   };
-  bindFlipButtons(el('board'));
+  bindLongPress(el('board'));
   bindCardZoom();
 }
 function setupPlayer() { return setupDone ? 1 : 0; }
@@ -115,7 +115,8 @@ function refresh() {
 }
 
 function phaseLabel() {
-  var map = { setup: 'Setup', draw: 'Draw', upkeep: 'Upkeep', main: 'Main', offense: 'Offense', end: 'End' };
+  var map = { setup: 'Setup', draw: 'Draw', upkeep: 'Upkeep', main: 'Main',
+              attack: 'Attack', defend: 'Defend', resolve: 'Resolve', end: 'End' };
   return map[S.phase] || S.phase;
 }
 
@@ -142,7 +143,9 @@ function phaseBanner() {
   var p = S.active, n = esc(S.players[p].name);
   if (S.phase === 'upkeep') return n + ': pay or skip each abomination\'s upkeep. Unpaid goes <b>feral</b>.';
   if (S.phase === 'main') return n + ': play cards, set traps, perform a ritual (1/turn), use abilities.';
-  if (S.phase === 'offense') return n + ': declare attackers, then ' + esc(S.players[1 - p].name) + ' assigns blockers.';
+  if (S.phase === 'attack') return n + ': declare attackers — click an abomination to toggle it in/out.';
+  if (S.phase === 'defend') return esc(S.players[1 - p].name) + ': click one of your creatures, then the attacker it blocks.';
+  if (S.phase === 'resolve') return 'Resolve combat — apply damage and outcomes, then continue.';
   if (S.phase === 'end') return n + ': discard down to 7, then end turn.';
   if (S.phase === 'draw') return n + ' draws.';
   return '';
@@ -158,6 +161,8 @@ function playerZoneHTML(pi, isFoe) {
     ' · Discard ' + pl.discard.length + '</span>' +
     (pl.ritualsDone.length ? ' <span class="rituals">☽ ' + pl.ritualsDone.length + '/3</span>' : '') +
     (pl.shield ? ' <span class="shield">🛡' + pl.shield + '</span>' : '') + '</div>';
+  // ---- the playing field: a distinct, labeled zone (interactive in every phase)
+  h += '<div class="field"><div class="field-label">' + (isFoe ? 'ENEMY FIELD' : 'YOUR FIELD') + '</div><div class="field-cards">';
   // characters + their leashed abominations
   h += '<div class="chars">' + pl.chars.map(function (u) { return charHTML(u, isFoe); }).join('') + '</div>';
   // unassigned/feral abominations
@@ -172,6 +177,7 @@ function playerZoneHTML(pi, isFoe) {
       return '<img class="mini facedown" src="' + DATA.cardBack + '" alt="face-down trap" title="Face-down trap">';
     }).join('') + '<span class="trap-note">' + pl.traps.length + ' trap(s) set</span></div>';
   }
+  h += '</div></div>'; // .field-cards, .field
   // hand
   if (isFoe) {
     h += '<div class="hand foe-hand">' + pl.hand.map(function () {
@@ -195,34 +201,76 @@ function statLine(uid) {
 }
 
 /* 3D flip-card wrapper: front face = card art, back face = card back.
-   Flip state persists in `flipped` across re-renders. The flip button
-   stop-propagates so it never triggers the card's click handler. */
-function flipWrap(uid, zone, frontHTML, extraCls) {
+   Flip state persists in `flipped` across re-renders. Flipping is a long-press
+   (500ms) on the card — no buttons, so tap/double-tap keep their meanings.
+   actionHTML: optional overlay (e.g. the quick-play button on hand cards). */
+function flipWrap(uid, zone, frontHTML, extraCls, actionHTML) {
   return '<div class="card3d ' + extraCls + (flipped[uid] ? ' flipped' : '') + '" data-uid="' + uid + '" data-zone="' + zone + '">' +
     '<div class="card3d-inner">' +
       '<div class="card3d-face card3d-front">' + frontHTML + '</div>' +
       '<div class="card3d-face card3d-back"><img src="' + DATA.cardBack + '" alt="card back"></div>' +
     '</div>' +
-    '<button class="flipbtn" data-flip="' + uid + '" title="Flip card" aria-label="Flip card">⟲</button>' +
+    (actionHTML || '') +
   '</div>';
 }
-function bindFlipButtons(root) {
-  root.querySelectorAll('[data-flip]').forEach(function (b) {
-    b.onclick = function (ev) {
-      ev.stopPropagation();
-      var uid = b.getAttribute('data-flip');
-      if (flipped[uid]) delete flipped[uid]; else flipped[uid] = true;
-      var card = b.closest('.card3d');
-      if (card) card.classList.toggle('flipped', !!flipped[uid]);
-    };
+function toggleFlip(uid) {
+  if (flipped[uid]) delete flipped[uid]; else flipped[uid] = true;
+  var card = document.querySelector('.card3d[data-uid="' + uid + '"]');
+  if (card) card.classList.toggle('flipped', !!flipped[uid]);
+}
+/* Long-press (500ms) flips a card. The press that flips sets
+   suppressNextClick so the release-click never selects/plays. The quick-play
+   button opts out of long-press entirely (tap = play, never flip). */
+var suppressNextClick = false;
+function bindLongPress(root) {
+  root.querySelectorAll('.card3d').forEach(function (card) {
+    if (card._lpBound) return;
+    card._lpBound = true;
+    var uid = card.getAttribute('data-uid');
+    var timer = null, sx = 0, sy = 0;
+    function overPlayBtn(t) { return t && t.closest && t.closest('[data-play]'); }
+    function start(x, y, t) {
+      if (overPlayBtn(t)) return; // play button: tap only, never flip
+      sx = x; sy = y;
+      clearTimeout(timer);
+      timer = setTimeout(function () {
+        toggleFlip(uid);
+        suppressNextClick = true;
+        if (navigator.vibrate) { try { navigator.vibrate(25); } catch (e) {} }
+      }, 500);
+    }
+    function cancel() { clearTimeout(timer); timer = null; }
+    function moved(x, y) { return Math.abs(x - sx) > 10 || Math.abs(y - sy) > 10; }
+    card.addEventListener('touchstart', function (e) {
+      var t = e.touches[0]; start(t.clientX, t.clientY, e.target);
+    }, { passive: true });
+    card.addEventListener('touchmove', function (e) {
+      var t = e.touches[0]; if (moved(t.clientX, t.clientY)) cancel();
+    }, { passive: true });
+    card.addEventListener('touchend', cancel);
+    card.addEventListener('touchcancel', cancel);
+    card.addEventListener('mousedown', function (e) {
+      if (e.button === 0) start(e.clientX, e.clientY, e.target);
+    });
+    card.addEventListener('mousemove', function (e) { if (timer && moved(e.clientX, e.clientY)) cancel(); });
+    card.addEventListener('mouseup', cancel);
+    card.addEventListener('mouseleave', cancel);
+    card.addEventListener('contextmenu', function (e) { e.preventDefault(); });
   });
+}
+function showFlipHintOnce() {
+  try {
+    if (localStorage.getItem('mythos_flip_hint')) return;
+    localStorage.setItem('mythos_flip_hint', '1');
+    setTimeout(function () { toast('Tip: long-press any card to flip it over.'); }, 1500);
+  } catch (e) {}
 }
 
 function boardCardHTML(uid, isFoe) {
   var it = S.inst[uid], d = Dd(uid);
   var cls = 'bcard' + (it.feral ? ' feral' : '') + (it.psan <= 0 && d.type === 'Character' ? ' burned' : '') +
     (it.asleepUntil >= S.turn ? ' asleep' : '');
-  if (S.phase === 'offense' && S.attackers.some(function (a) { return a.uid === uid; })) cls += ' attacking';
+  if (S.phase === 'attack' && S.attackers.some(function (a) { return a.uid === uid; })) cls += ' attacking';
   if (S.blockers && Object.keys(S.blockers).some(function (k) { return S.blockers[k] === uid; })) cls += ' blocking';
   var front = '<img src="' + imgFor(uid) + '" alt="' + esc(d.name) + '">' +
     '<div class="bstats">' + esc(statLine(uid)) + '</div>' +
@@ -251,9 +299,33 @@ function handCardHTML(uid) {
     else { var c = E.canPlay(S, meIndex(), uid); playable = c.ok; }
     if (d.type === 'Ritual') { var ri = E.ritualInfo(S, meIndex(), uid); playable = ri.ok; }
   }
+  var playBtn = playable
+    ? '<button class="playbtn" data-play="' + uid + '" title="Play now" aria-label="Play ' + esc(d.name) + ' now">▶</button>'
+    : '';
   return flipWrap(uid, 'hand',
     '<img src="' + imgFor(uid) + '" alt="' + esc(d.name) + '" title="' + esc(d.name) + '">',
-    cls + (playable ? ' playable' : ''));
+    cls + (playable ? ' playable' : ''), playBtn);
+}
+
+/* Tap ▶ on a hand card: play it immediately when no extra choices are needed.
+   Cards needing targets, leash choices, or ritual setup fall back to the
+   detail modal flow. */
+function quickPlay(uid) {
+  var me = meIndex(), d = Dd(uid);
+  if (!(S.phase === 'main' && S.active === me)) { toast('Play cards during your Main phase.'); return; }
+  var r;
+  if (d.type === 'Trap') {
+    r = E.setTrap(S, me, uid);
+    if (!r.ok) toast(r.error);
+    return afterAction();
+  }
+  if (d.type === 'Ritual') { openDetail(uid, 'hand'); return; }
+  var c = E.canPlay(S, me, uid);
+  if (!c.ok) { toast(c.error); return; }
+  if (c.need) { openDetail(uid, 'hand'); return; } // target/leash → modal choices
+  r = E.playCard(S, me, uid, {});
+  if (!r.ok) toast(r.error);
+  afterAction();
 }
 
 function meIndex() { return mode === 'ai' ? 0 : S.active; }
@@ -296,7 +368,15 @@ function bindBoard() {
   cards.forEach(function (c) {
     c.onclick = function (ev) { ev.stopPropagation(); onCardClick(c.getAttribute('data-uid'), c.getAttribute('data-zone')); };
   });
-  bindFlipButtons(el('board'));
+  bindLongPress(el('board'));
+  // quick-play buttons: tap ▶ to play immediately (never flips — long-press opts out)
+  el('board').querySelectorAll('[data-play]').forEach(function (b) {
+    b.onclick = function (ev) {
+      ev.stopPropagation();
+      if (suppressNextClick) { suppressNextClick = false; return; }
+      quickPlay(b.getAttribute('data-play'));
+    };
+  });
   var ups = el('board').querySelectorAll('[data-act]');
   ups.forEach(function (b) {
     b.onclick = function (ev) {
@@ -332,6 +412,7 @@ function attackWhyNot(uid) {
 }
 
 function onCardClick(uid, zone) {
+  if (suppressNextClick) { suppressNextClick = false; return; } // long-press release: swallow
   if (S.winner) return;
   var me = meIndex();
   // pending decision modals handle their own clicks
@@ -347,12 +428,10 @@ function onCardClick(uid, zone) {
     if (S.players[me].hand.length <= 7) { discardMode = false; }
     return afterAction();
   }
-  // offense: declare attackers / assign blockers
-  if (S.phase === 'offense' && zone === 'board' && !S.combatResolved) {
-    var it = S.inst[uid], di = defenderIndex();
-    var canDeclare = S.active === me && (mode === 'ai' || !declaringDone);
-    var canDefend = S.attackers.length && (mode === 'ai' ? S.active === aiIdx : declaringDone);
-    if (canDeclare && it.controller === me && Dd(uid).type === 'Abomination') {
+  // attack phase: active player declares attackers (click to toggle)
+  if (S.phase === 'attack' && zone === 'board' && S.active === me) {
+    var it = S.inst[uid];
+    if (it.controller === me && Dd(uid).type === 'Abomination') {
       // toggle: click a declared attacker to stand it down
       var already = S.attackers.some(function (a) { return a.uid === uid; });
       if (already) {
@@ -367,22 +446,24 @@ function onCardClick(uid, zone) {
       }
       return toast(attackWhyNot(uid));
     }
-    if (canDefend) {
-      // 1. click one of your own creatures to select it as the blocker
-      if (it.controller === di && E.canBlock(S, uid)) {
-        blockSel = uid;
-        toast('Blocker selected — now click an attacker.');
-        refresh(); return;
-      }
-      // 2. click an attacker to assign the selected blocker to it
-      if (it.controller === S.active && blockSel) {
-        var atk = S.attackers.filter(function (a) { return a.uid === uid; })[0];
-        if (atk && E.canBlock(S, blockSel)) {
-          var r2 = E.declareBlocker(S, di, blockSel, uid);
-          blockSel = null;
-          if (!r2.ok) return toast(r2.error);
-          return afterAction();
-        }
+  }
+  // defend phase: defender clicks own creature to select, then an attacker to assign
+  if (S.phase === 'defend' && zone === 'board' && S.attackers.length) {
+    var di = defenderIndex(), it2 = S.inst[uid];
+    // 1. click one of the defender's creatures to select it as the blocker
+    if (it2.controller === di && E.canBlock(S, uid)) {
+      blockSel = uid;
+      toast('Blocker selected — now click an attacker.');
+      refresh(); return;
+    }
+    // 2. click an attacker to assign the selected blocker to it
+    if (it2.controller === S.active && blockSel) {
+      var atk = S.attackers.filter(function (a) { return a.uid === uid; })[0];
+      if (atk && E.canBlock(S, blockSel)) {
+        var r2 = E.declareBlocker(S, di, blockSel, uid);
+        blockSel = null;
+        if (!r2.ok) return toast(r2.error);
+        return afterAction();
       }
     }
   }
@@ -423,13 +504,13 @@ function openDetail(uid, zone) {
     var ab = E.activatedInfo(S, uid);
     if (ab && S.phase === 'main' && S.active === me) h += '<button data-m="activate">Use: ' + esc(ab.name) + '</button>';
     if (it.feral && S.phase === 'main') h += '<button data-m="releash">Re-leash (2◈)</button>';
-    if (d.type === 'Abomination' && S.phase === 'offense' && S.active === me && E.canAttack(S, uid))
+    if (d.type === 'Abomination' && S.phase === 'attack' && S.active === me && E.canAttack(S, uid))
       h += '<button data-m="attack">Attack</button>';
   }
   h += '<button data-m="close">Close</button></div></div>';
   el('detail-body').innerHTML = h;
   el('detail').style.display = 'flex';
-  bindFlipButtons(el('detail-body'));
+  bindLongPress(el('detail-body'));
   el('detail-body').querySelectorAll('[data-m]').forEach(function (b) {
     b.onclick = function () { detailAction(b.getAttribute('data-m'), uid, zone); };
   });
@@ -587,15 +668,15 @@ function renderPending() {
 
 /* ---------------- flow ---------------- */
 function onNextPhase() {
-  if (S.phase === 'offense' && S.active === meIndex() && S.attackers.length && !S.combatResolved) {
-    // done declaring (hotseat: defender blocks next)
-    if (mode === 'hotseat') { toast('Pass to ' + S.players[1 - S.active].name + ' to assign blockers, then Resolve.'); }
-    return;
-  }
   var r = E.nextPhase(S);
   if (!r.ok) { toast(r.error); return; }
+  if (r.tally) toast(r.tally); // stage-end tally: no silent stat changes
   // entering end phase: may need discards
   if (S.phase === 'end' && S.players[S.active].hand.length > 7 && S.active === meIndex()) discardMode = true;
+  // vs AI: the AI defends for itself the moment the human's attack phase ends
+  if (S.phase === 'defend' && mode === 'ai' && S.active !== aiIdx && S.attackers.length && !S.winner && !S.pending) {
+    AI.assignBlockers(S, aiIdx);
+  }
   afterAction();
 }
 
@@ -609,7 +690,7 @@ function onResolveCombat() {
 function afterAction() {
   closeDetail();
   targeting = null;
-  if (!S || S.phase !== 'offense') { declaringDone = false; blockSel = null; }
+  if (S.phase !== 'defend') blockSel = null;
   if (S.winner) return refresh();
   renderPending();
   if (S.pending && S.pending.player === meIndex()) { refresh(); return; } // modal up, wait
@@ -628,11 +709,12 @@ function maybeAI() {
 
 function aiStep() {
   if (!S || S.winner || S.active !== aiIdx) return;
-  if (S.phase === 'draw') E.nextPhase(S);
-  else if (S.phase === 'upkeep') { AI.upkeep(S, aiIdx); E.nextPhase(S); }
+  if (S.phase === 'draw') { S._aiAtkDone = false; S._aiResDone = false; var t0 = E.nextPhase(S); if (t0.tally) toast(t0.tally); }
+  else if (S.phase === 'upkeep') { AI.upkeep(S, aiIdx); var t1 = E.nextPhase(S); if (!t1.ok) toast(t1.error); else if (t1.tally) toast(t1.tally); }
   else if (S.phase === 'main') {
     var played = AI.main(S, aiIdx) || [];
-    E.nextPhase(S);
+    var t2 = E.nextPhase(S);
+    if (!t2.ok) toast(t2.error); else if (t2.tally) toast(t2.tally);
     // the AI's whole main phase resolves instantly — summarize what it did
     // (and what it paid) so its plays aren't silent
     if (played.length && !S.winner) {
@@ -640,17 +722,33 @@ function aiStep() {
       toast('AI played ' + played.map(function (p) { return p.name; }).join(', ') + ' (−' + total + '◈).');
     }
   }
-  else if (S.phase === 'offense') { AI.declareAttacks(S, aiIdx); }
-  else if (S.phase === 'end') { AI.discardDown(S, aiIdx); E.nextPhase(S); }
+  else if (S.phase === 'attack') {
+    // declare once per attack phase; the human advances with Next phase →
+    if (!S._aiAtkDone) { S._aiAtkDone = true; AI.declareAttacks(S, aiIdx); }
+  }
+  else if (S.phase === 'defend') { /* AI is the attacker here; the human defends via the UI */ }
+  else if (S.phase === 'resolve') {
+    if (!S._aiResDone) {
+      S._aiResDone = true;
+      var rr = E.resolveCombat(S);
+      if (!rr.ok) toast(rr.error);
+    }
+  }
+  else if (S.phase === 'end') { AI.discardDown(S, aiIdx); var t3 = E.nextPhase(S); if (!t3.ok) toast(t3.error); else if (t3.tally) toast(t3.tally); }
   if (S.pending && S.pending.player === aiIdx) AI.decide(S);
   refresh();
-  // if AI declared attackers, human assigns blockers via board clicks + resolve button
-  if (S.phase === 'offense' && S.active === aiIdx && S.attackers.length) {
-    toast('Assign your blockers, then Resolve combat.');
+  // AI defends for itself when the human is the attacker
+  if (S.phase === 'defend' && S.active !== aiIdx && S.attackers.length && !S.winner && !S.pending) {
+    AI.assignBlockers(S, aiIdx);
+    refresh();
+  }
+  // if AI declared attackers, the human assigns blockers via board clicks, then resolves
+  if (S.phase === 'defend' && S.active === aiIdx && S.attackers.length) {
+    toast('Assign your blockers, then continue to Resolve.');
   }
 }
 
-/* resolve button appears in midbar during offense */
+/* resolve button appears in midbar during the resolve phase */
 function renderLog() {
   var h = S.log.slice(-60).map(function (e) { return '<div>[' + e.turn + '/' + e.phase + '] ' + esc(e.msg) + '</div>'; }).join('');
   el('log').innerHTML = h;
@@ -690,8 +788,8 @@ document.addEventListener('DOMContentLoaded', function () {
     if (!S || S.winner) return;
     var mid = document.getElementById('midbar');
     if (!mid) return;
-    var need = S.phase === 'offense' && S.attackers.length && !S.combatResolved && !S.pending &&
-      (mode === 'ai' || declaringDone);
+    // resolve button appears in midbar during the resolve phase, when combat awaits
+    var need = S.phase === 'resolve' && S.attackers.length && !S.combatResolved && !S.pending;
     var btn = document.getElementById('btn-resolve');
     if (need && !btn) {
       var b = document.createElement('button');
@@ -699,19 +797,6 @@ document.addEventListener('DOMContentLoaded', function () {
       b.onclick = onResolveCombat;
       mid.appendChild(b);
     } else if (!need && btn) btn.remove();
-    // offense "done declaring" button for attacker (hotseat)
-    var btn2 = document.getElementById('btn-done-atk');
-    var need2 = mode === 'hotseat' && S.phase === 'offense' && S.active === meIndex() && !declaringDone && !S.pending;
-    if (need2 && !btn2) {
-      var b2 = document.createElement('button');
-      b2.id = 'btn-done-atk'; b2.textContent = 'Done declaring → defender blocks'; b2.className = 'resolve-btn';
-      b2.onclick = function () {
-        declaringDone = true;
-        toast('Pass to ' + S.players[1 - S.active].name + ': click a blocker, then the attacker it blocks. Then Resolve.');
-        refresh();
-      };
-      mid.appendChild(b2);
-    } else if (!need2 && btn2) btn2.remove();
   }, 400);
 });
 })();

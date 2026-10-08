@@ -415,13 +415,41 @@ function drawCards(st, pi, n, silent) {
 }
 
 /* ---------------- Phases --------------------------------------------------- */
-var PHASES = ['draw', 'upkeep', 'main', 'offense', 'end'];
+/* Turn order: draw → upkeep → main → attack → defend → resolve → end.
+ * attack  = active player declares attackers (click to toggle)
+ * defend  = defending player assigns blockers
+ * resolve = combat damage + outcomes applied (via the Resolve action)
+ * defend/resolve are auto-skipped when no attackers were declared. */
+var PHASES = ['draw', 'upkeep', 'main', 'attack', 'defend', 'resolve', 'end'];
 
 MYTHOS.startGame = function (st) {
   // setup mulligans are resolved via doAction mulligan/pass; begin turn 1
   st.phase = 'turnstart';
   MYTHOS.nextPhase(st);
 };
+
+/* Snapshot per-player vitals for stage-end tallying (no silent stat changes). */
+function snapStats(st) {
+  return st.players.map(function (pl) {
+    return { sanity: pl.sanity, hand: pl.hand.length, deck: pl.deck.length,
+             board: pl.chars.length + pl.aboms.length };
+  });
+}
+function tallyDiff(st, fromPhase, toPhase, before) {
+  var parts = [];
+  for (var p = 0; p < 2; p++) {
+    var a = before[p], pl = st.players[p], bits = [];
+    var ds = pl.sanity - a.sanity;
+    if (ds !== 0) bits.push((ds > 0 ? '+' : '') + ds + '◈');
+    if (pl.hand.length !== a.hand) bits.push('hand ' + a.hand + '→' + pl.hand.length);
+    var b = pl.chars.length + pl.aboms.length;
+    if (b !== a.board) bits.push('field ' + a.board + '→' + b);
+    if (bits.length) parts.push(pl.name + ' ' + bits.join(', '));
+  }
+  var msg = parts.length ? ('Tally [' + fromPhase + ' → ' + toPhase + ']: ' + parts.join(' · ')) : null;
+  if (msg) log(st, msg);
+  return msg;
+}
 
 MYTHOS.nextPhase = function (st) {
   if (st.winner || st.pending) return { ok: false, error: 'Resolve pending decision first.' };
@@ -437,22 +465,32 @@ MYTHOS.nextPhase = function (st) {
       }
     });
   }
-  if (st.phase === 'offense' && st.attackers.length && !st.combatResolved) {
-    return { ok: false, error: 'Resolve combat first.' };
-  }
-  if (st.phase === 'offense') {
-    // Paper Jam must attack if able
+  if (st.phase === 'attack') {
+    // Paper Jam must attack if able — enforced before leaving attack
     var pj = st.players[st.active].aboms.filter(function (u) {
       return st.inst[u].def === 13 && canAttack(st, u) && !attackedThis(st, u);
     });
     if (pj.length) return { ok: false, error: 'Paper Jam must attack each turn if able.' };
   }
+  if (st.phase === 'resolve' && st.attackers.length && !st.combatResolved) {
+    return { ok: false, error: 'Resolve combat first.' };
+  }
+  var fromPhase = st.phase;
+  var before = snapStats(st);
   var idx = PHASES.indexOf(st.phase);
-  if (st.phase === 'turnstart' || idx < 0) { beginTurn(st); return { ok: true }; }
-  if (st.phase === 'end') { beginTurn(st); return { ok: true }; }
+  if (st.phase === 'turnstart' || idx < 0) { beginTurn(st); return { ok: true, tally: null }; }
+  if (st.phase === 'end') { beginTurn(st); return { ok: true, tally: tallyDiff(st, fromPhase, 'draw', before) }; }
   st.phase = PHASES[idx + 1];
   enterPhase(st);
-  return { ok: true };
+  // auto-skip empty combat stages: no attackers, nothing to block or resolve
+  var guard = 0;
+  while (guard++ < 4 && (st.phase === 'defend' || st.phase === 'resolve') &&
+         !st.attackers.length && !st.winner && !st.pending) {
+    if (st.phase === 'resolve') st.combatResolved = true;
+    st.phase = PHASES[PHASES.indexOf(st.phase) + 1];
+    enterPhase(st);
+  }
+  return { ok: true, tally: tallyDiff(st, fromPhase, st.phase, before) };
 };
 
 function beginTurn(st) {
@@ -462,12 +500,15 @@ function beginTurn(st) {
   var pl = st.players[st.active];
   pl.ritualThisTurn = false; pl.drewThisTurn = 0; pl.staplerUsed = false;
   st.attackers = []; st.blockers = {}; st.combatResolved = false;
-  // reset justEntered / temp mods
+  // reset justEntered / temp mods — announce expiries (no silent stat changes)
+  var expiring = [];
   Object.keys(st.inst).forEach(function (uid) {
     var it = st.inst[uid];
+    if (it.pMod || it.fMod || it.cMod) expiring.push(cname(st, uid));
     it.justEntered = false; it.stapleOff = false; it.upkeepPaid = false;
     it.pMod = 0; it.fMod = 0; it.cMod = 0;
   });
+  if (expiring.length) log(st, 'End-of-turn effects wear off: ' + expiring.join(', ') + '.');
   // clear sleep/ability locks that expired
   Object.keys(st.inst).forEach(function (uid) {
     var it = st.inst[uid];
@@ -509,8 +550,8 @@ function enterPhase(st) {
     log(st, pl.name + ' upkeep: pay or skip each abomination.');
   } else if (st.phase === 'main') {
     log(st, pl.name + ' main phase.');
-  } else if (st.phase === 'offense') {
-    // feral abominations hit their owner's sanity
+  } else if (st.phase === 'attack') {
+    // feral abominations hit their owner's sanity at the start of combat
     pl.aboms.slice().forEach(function (u) {
       var it = st.inst[u];
       if (it.feral) {
@@ -527,7 +568,12 @@ function enterPhase(st) {
         log(st, 'Performance Reviewer gains +2 Power until end of turn (360 feedback).');
       }
     });
-    log(st, pl.name + ' offense: declare attackers.');
+    log(st, pl.name + ' attack: declare attackers (click an abomination to toggle).');
+  } else if (st.phase === 'defend') {
+    if (st.attackers.length)
+      log(st, st.players[FOE(st, p)].name + ' defend: click one of your creatures, then the attacker it blocks.');
+  } else if (st.phase === 'resolve') {
+    if (st.attackers.length) log(st, 'Resolve: apply combat damage and outcomes.');
   } else if (st.phase === 'end') {
     // The Temp
     pl.aboms.slice().forEach(function (u) {
@@ -573,7 +619,7 @@ function payUpkeep(st, pi, uid) {
 function canAttack(st, uid) {
   var it = st.inst[uid];
   if (it.zone !== 'board' || it.feral) return false;
-  if (it.controller !== st.active || st.phase !== 'offense') return false;
+  if (it.controller !== st.active || st.phase !== 'attack') return false;
   if (effPower(st, uid) <= 0) return false;
   if (it.justEntered && it.def !== 18) return false; // summoning sickness (not Overtime Wraith)
   return true;
@@ -1105,7 +1151,7 @@ MYTHOS.releash = function (st, pi, uid, charUid) {
 
 /* Combat declarations */
 MYTHOS.declareAttacker = function (st, pi, uid, target) {
-  if (st.phase !== 'offense' || st.active !== pi) return { ok: false, error: 'Declare attackers in your Offense.' };
+  if (st.phase !== 'attack' || st.active !== pi) return { ok: false, error: 'Declare attackers in your Attack phase.' };
   if (!canAttack(st, uid)) return { ok: false, error: 'That abomination cannot attack.' };
   if (attackedThis(st, uid)) return { ok: false, error: 'Already attacking.' };
   var foe = FOE(st, pi);
@@ -1123,7 +1169,7 @@ MYTHOS.declareAttacker = function (st, pi, uid, target) {
 };
 
 MYTHOS.declareBlocker = function (st, pi, uid, attackerUid) {
-  if (st.phase !== 'offense' || st.active === pi) return { ok: false, error: 'The defender assigns blockers.' };
+  if (st.phase !== 'defend' || st.active === pi) return { ok: false, error: 'The defender assigns blockers during Defend.' };
   var atk = st.attackers.filter(function (a) { return a.uid === attackerUid; })[0];
   if (!atk) return { ok: false, error: 'Not an attacker.' };
   if (st.blockers[attackerUid]) return { ok: false, error: 'Already blocked.' };
@@ -1135,7 +1181,7 @@ MYTHOS.declareBlocker = function (st, pi, uid, attackerUid) {
 };
 
 MYTHOS.undeclareAttacker = function (st, pi, uid) {
-  if (st.phase !== 'offense' || st.active !== pi) return { ok: false, error: 'Not your offense.' };
+  if (st.phase !== 'attack' || st.active !== pi) return { ok: false, error: 'Not your attack phase.' };
   var i = st.attackers.findIndex(function (a) { return a.uid === uid; });
   if (i < 0) return { ok: false, error: 'Not attacking.' };
   st.attackers.splice(i, 1);
@@ -1145,7 +1191,7 @@ MYTHOS.undeclareAttacker = function (st, pi, uid) {
 };
 
 MYTHOS.resolveCombat = function (st) {
-  if (st.phase !== 'offense') return { ok: false, error: 'Not offense.' };
+  if (st.phase !== 'resolve') return { ok: false, error: 'Not the resolve phase.' };
   if (st.pending) return { ok: false, error: 'Resolve pending decision first.' };
   resolveCombat(st);
   return { ok: true };
