@@ -108,5 +108,16 @@ window.addEventListener('unhandledrejection', function (e) {
 <script src="ai.js"></script>
 <script src="net.js"></script>
 <script src="ui.js"></script>
+<!-- Firebase (identity, collections, stats). Fails soft to offline mode. -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="firebase-config.js"></script>
+<script src="firebase.js"></script>
+<script>
+  if (window.MYTHOS_FIREBASE && window.MYTHOS_FIREBASE_CONFIG) {
+    window.MYTHOS_FIREBASE.init(window.MYTHOS_FIREBASE_CONFIG);
+  }
+</script>
 </body>
 </html>
