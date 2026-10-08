@@ -16,7 +16,20 @@ function Dd(uid_or_id, st) {
   return DEFS[id];
 }
 function handOf(st, pi) { return st.players[pi].hand.slice(); }
-function afford(st, pi, cost) { return st.players[pi].sanity > cost; } // keep 1+ sanity
+/* Sanity buffer: keep enough to survive next upkeep + feral hits from own board. */
+function sanityBuffer(st, pi) {
+  var buf = 3; // base caution
+  var pl = st.players[pi];
+  pl.aboms.forEach(function (u) {
+    var it = st.inst[u];
+    if (!it.upkeepPaid) {
+      try { buf += E.effUpkeep(st, u) || 0; } catch (e) {}
+      if (it.feral) { try { buf += E.effPower(st, u) || 0; } catch (e) {} }
+    }
+  });
+  return buf;
+}
+function afford(st, pi, cost) { return st.players[pi].sanity > cost + sanityBuffer(st, pi); }
 
 AI.mulliganDecision = function (st, pi) {
   // mulligan if no character in opening hand
