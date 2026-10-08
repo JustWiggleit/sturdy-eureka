@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MYTHOS: Hostile Takeover — Playable v1</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="start-screen">
+  <div class="title-block">
+    <h1>MYTHOS</h1>
+    <div class="subtitle">HOSTILE TAKEOVER</div>
+    <p class="tagline">A corporate-Lovecraft card game for 2 players. Playable prototype v1.</p>
+  </div>
+  <div class="deck-pick">
+    <div class="deck-card"><h3 id="deck-a-name">Deck A</h3><p>Ritual control — burn out your team, then take over reality.</p></div>
+    <div class="vs">VS</div>
+    <div class="deck-card"><h3 id="deck-b-name">Deck B</h3><p>Hostile aggro — flood the board and break their mind.</p></div>
+  </div>
+  <div class="mode-btns">
+    <button id="start-hotseat">👥 2 Players (hotseat)</button>
+    <button id="start-ai">🤖 Play vs AI</button>
+  </div>
+  <details class="howto">
+    <summary>How to play (quick)</summary>
+    <ul>
+      <li>Each player starts at <b>40 sanity</b> — it's your life <i>and</i> your currency.</li>
+      <li>Win by breaking the enemy to 0 sanity, completing <b>3 rituals</b>, or decking them out.</li>
+      <li>Turn: <b>Draw → Upkeep → Main → Offense → End</b>. Use <b>Next phase →</b> to advance.</li>
+      <li><b>Main:</b> click a card in hand for Play / Set trap / Ritual / Ability options.</li>
+      <li><b>Upkeep:</b> pay each abomination or it goes <b>feral</b> and eats <i>your</i> sanity.</li>
+      <li><b>Offense:</b> click your abominations to attack, then <b>Done declaring</b>; the defender clicks a blocker, then the attacker it blocks; then <b>⚔ Resolve combat</b>.</li>
+      <li><b>Characters</b> never attack but can block. At 0 personal sanity they <b>burn out</b> — prime ritual fuel.</li>
+      <li><b>Rituals</b> need a ritual site (Altar/Grove) + a burned-out character sacrificed. One per turn.</li>
+      <li><b>Double-click</b> any card image to zoom it.</li>
+    </ul>
+  </details>
+  <p class="foot">v1 prototype — rules simplifications listed in README.md · art: the MYTHOS 060 set</p>
+</div>
+
+<div id="game-screen" style="display:none">
+  <div id="board"></div>
+  <div id="midbar"></div>
+  <div id="pending" style="display:none"></div>
+  <div id="log" style="display:none"></div>
+</div>
+
+<div id="detail" style="display:none">
+  <div class="modal">
+    <button id="detail-close" class="x">✕</button>
+    <div id="detail-body"></div>
+  </div>
+</div>
+
+<div id="zoom" style="display:none">
+  <div class="modal zoom-modal">
+    <button id="zoom-close" class="x">✕</button>
+    <img id="zoom-img" src="" alt="card zoom">
+  </div>
+</div>
+
+<div id="toast" style="display:none"></div>
+
+<script src="data.js"></script>
+<script src="engine.js"></script>
+<script src="ai.js"></script>
+<script src="net.js"></script>
+<script src="ui.js"></script>
+</body>
+</html>
