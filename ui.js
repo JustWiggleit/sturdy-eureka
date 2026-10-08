@@ -18,6 +18,28 @@ var discardMode = false;
 var declaringDone = false;    // hotseat: attacker finished declaring
 var logOpen = false;
 
+/* v2 pre-game config */
+var REPORT_EMAIL = 'trollsquadproductions+technicalissues@gmail.com';
+var WIX_LOGIN_URL = 'https://sites.google.com/view/mythosportal/'; // TODO: point at Wix membership site when built
+var isGuest = false;
+
+function reportIssue(context) {
+  var errs = (window.__mythosErrors || []).join(' | ') || 'none captured';
+  var body = 'What happened:\n\n\n--- diagnostics ---\n' +
+    'context: ' + (context || 'manual report') + '\n' +
+    'errors: ' + errs + '\n' +
+    'url: ' + location.href + '\n' +
+    'time: ' + new Date().toISOString() + '\n' +
+    'browser: ' + navigator.userAgent;
+  location.href = 'mailto:' + REPORT_EMAIL +
+    '?subject=' + encodeURIComponent('MYTHOS issue report') +
+    '&body=' + encodeURIComponent(body);
+}
+function hideLoader() {
+  var l = el('loader'); if (l) l.style.display = 'none';
+  var s = el('start-screen'); if (s) s.style.display = 'block';
+}
+
 function el(id) { return document.getElementById(id); }
 function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
 function Dd(uid) { return cardDef(S.inst[uid].def); }
@@ -32,8 +54,14 @@ function cname(uid) { var d = Dd(uid); return d.name; }
 /* ---------------- boot ---------------- */
 function boot() {
   renderStart();
-  el('start-hotseat').onclick = function () { mode = 'hotseat'; newMatch(); };
-  el('start-ai').onclick = function () { mode = 'ai'; newMatch(); };
+  el('start-hotseat').onclick = function () { mode = 'hotseat'; isGuest = false; newMatch(); };
+  el('start-ai').onclick = function () { mode = 'ai'; isGuest = false; newMatch(); };
+  el('start-guest').onclick = function () { mode = 'ai'; isGuest = true; newMatch(); }; // guest: default deck vs AI
+  el('start-login').onclick = function () { location.href = WIX_LOGIN_URL; };
+  el('start-report').onclick = function () { reportIssue('start screen'); };
+  var lr = el('loader-report');
+  if (lr) lr.onclick = function () { reportIssue('loader error'); };
+  hideLoader();
 }
 function newMatch() {
   var decks = [DATA.decks[deckChoice[0]].cards.slice(), DATA.decks[deckChoice[1]].cards.slice()];
@@ -579,12 +607,16 @@ function toast(msg) {
 var _renderBoard = null;
 
 document.addEventListener('DOMContentLoaded', function () {
-  E.setDefs(DATA.cards);
-  AI.setDefs(DATA.cards);
+  try {
+    E.setDefs(DATA.cards);
+    AI.setDefs(DATA.cards);
   el('zoom-close').onclick = closeZoom;
   el('zoom').onclick = closeZoom;
   el('detail-close').onclick = closeDetail;
   boot();
+  } catch (err) {
+    if (window.__showLoadError) window.__showLoadError(err && err.message);
+  }
   // inject resolve button into midbar area on each render
   setInterval(function () {
     if (!S || S.winner) return;

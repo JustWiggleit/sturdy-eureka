@@ -5,10 +5,43 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MYTHOS: Hostile Takeover — Playable v1</title>
 <link rel="stylesheet" href="style.css">
+<script>
+/* Early error trap: runs before game scripts. Any load failure surfaces the
+   loader's Report button instead of a dead page. */
+window.__mythosErrors = [];
+window.__showLoadError = function (msg) {
+  window.__mythosErrors.push(String(msg || 'unknown error'));
+  var spin = document.getElementById('loader-spinner');
+  var txt = document.getElementById('loader-text');
+  var err = document.getElementById('loader-error');
+  if (spin) spin.style.display = 'none';
+  if (txt) txt.textContent = 'The game failed to load.';
+  if (err) err.style.display = 'block';
+};
+window.addEventListener('error', function (e) {
+  window.__showLoadError(e.message || 'script error');
+}, true);
+window.addEventListener('unhandledrejection', function (e) {
+  window.__showLoadError((e.reason && e.reason.message) || 'unhandled rejection');
+}, true);
+</script>
 </head>
 <body>
 
-<div id="start-screen">
+<div id="loader">
+  <div class="loader-inner">
+    <h1>MYTHOS</h1>
+    <div class="subtitle">HOSTILE TAKEOVER</div>
+    <div class="spinner" id="loader-spinner"></div>
+    <p id="loader-text">Loading…</p>
+    <div id="loader-error" style="display:none">
+      <p>Something went wrong while loading the game.</p>
+      <button id="loader-report" class="report-btn">Report issue</button>
+    </div>
+  </div>
+</div>
+
+<div id="start-screen" style="display:none">
   <div class="title-block">
     <h1>MYTHOS</h1>
     <div class="subtitle">HOSTILE TAKEOVER</div>
@@ -20,8 +53,15 @@
     <div class="deck-card"><h3 id="deck-b-name">Deck B</h3><p>Hostile aggro — flood the board and break their mind.</p></div>
   </div>
   <div class="mode-btns">
+    <button id="start-login" class="login-btn">🔑 Login (members)</button>
+    <button id="start-guest">🎫 Play as guest</button>
+  </div>
+  <div class="mode-btns">
     <button id="start-hotseat">👥 2 Players (hotseat)</button>
     <button id="start-ai">🤖 Play vs AI</button>
+  </div>
+  <div class="mode-btns">
+    <button id="start-report" class="report-btn">⚠ Report issue</button>
   </div>
   <details class="howto">
     <summary>How to play (quick)</summary>

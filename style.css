@@ -153,3 +153,37 @@ img.facedown { filter: brightness(.95); }
   #topbar { font-size: 14px; }
   .modal { padding: 12px; }
 }
+
+/* ---- loader ---- */
+#loader {
+  position: fixed; inset: 0; z-index: 9999;
+  background: #0a0a0f;
+  display: flex; align-items: center; justify-content: center;
+  text-align: center; color: #e8e4d8;
+}
+.loader-inner h1 {
+  font-size: 56px; letter-spacing: 18px; color: #c9a227; margin: 0 0 4px;
+  text-shadow: 0 0 24px rgba(201,162,39,.45);
+}
+.loader-inner .subtitle { letter-spacing: 8px; color: #8a2be2; font-size: 14px; margin-bottom: 24px; }
+.spinner {
+  width: 44px; height: 44px; margin: 0 auto 16px;
+  border: 3px solid #2a2a35; border-top-color: #c9a227; border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+#loader-text { color: #999; font-size: 14px; }
+#loader-error p { color: #e06060; margin: 12px 0; }
+
+/* ---- report + login buttons ---- */
+.report-btn {
+  background: #3a1f1f; color: #f0b0b0; border: 1px solid #8a3030;
+  padding: 10px 22px; border-radius: 6px; cursor: pointer; font-size: 15px;
+}
+.report-btn:hover { background: #4a2828; }
+.login-btn {
+  background: #1f2f3a; color: #b0d8f0; border: 1px solid #2f6f8f;
+  padding: 10px 22px; border-radius: 6px; cursor: pointer; font-size: 15px;
+}
+.login-btn:hover { background: #2a3f4f; }
+#start-screen .mode-btns { margin-top: 14px; }
