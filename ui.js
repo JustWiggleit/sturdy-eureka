@@ -1243,6 +1243,18 @@ document.addEventListener('DOMContentLoaded', function () {
   } catch (err) {
     if (window.__showLoadError) window.__showLoadError(err && err.message);
   }
+  // Orientation / resize: re-render after the browser settles so cached
+  // dimensions (drag targets, draw animation endpoints) are fresh.
+  // CSS handles the visual transition; this just refreshes JS-side geometry.
+  var rsT = null;
+  function onResize() {
+    clearTimeout(rsT);
+    rsT = setTimeout(function () {
+      if (S && S.winner == null) refresh();
+    }, 250);
+  }
+  window.addEventListener('orientationchange', onResize);
+  window.addEventListener('resize', onResize);
   // inject resolve button into midbar area on each render
   setInterval(function () {
     if (!S || S.winner != null) return;
