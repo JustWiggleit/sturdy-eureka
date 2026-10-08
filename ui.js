@@ -201,6 +201,7 @@ function renderSetup2() { setupDone = true; renderSetup(); }
 function refresh() {
   if (!S) return;
   if (S.winner) return renderGameOver();
+  announceDraws();
   if (S.pending && S.pending.player !== undefined && mode === 'ai' && S.pending.player === aiIdx) {
     AI.decide(S); return refresh();
   }
@@ -793,6 +794,19 @@ function afterAction() {
   renderPending();
   if (S.pending && S.pending.player === meIndex()) { refresh(); return; } // modal up, wait
   refresh();
+}
+
+/* Announce drawn cards visibly — no silent draws. Opponent draws stay hidden. */
+function announceDraws() {
+  if (!S || !S.lastDrawn) return;
+  var d = S.lastDrawn;
+  S.lastDrawn = null;
+  if (!d.uids || !d.uids.length) return;
+  var isMe = d.player === meIndex();
+  var names = d.uids.map(function (u) { return isMe ? cname(u) : 'a card'; });
+  // de-dupe display for multiples
+  var label = isMe ? names.join(', ') : (d.uids.length + ' card' + (d.uids.length > 1 ? 's' : ''));
+  toast((isMe ? '📥 You draw: ' : '📥 ' + S.players[d.player].name + ' draws ') + label + '.');
 }
 
 function maybeAI() {

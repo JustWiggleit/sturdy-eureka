@@ -382,6 +382,7 @@ function goFeral(st, uid, why) {
 /* ---------------- Draw ---------------------------------------------------- */
 function drawCards(st, pi, n, silent) {
   var pl = st.players[pi];
+  var drawn = [];
   for (var i = 0; i < n; i++) {
     if (!pl.deck.length) {
       if (!st.winner) {
@@ -389,11 +390,12 @@ function drawCards(st, pi, n, silent) {
         st.winReason = st.players[pi].name + ' must draw from an empty deck — drowned in paperwork. ' + st.players[FOE(st, pi)].name + ' wins.';
         log(st, st.winReason);
       }
-      return;
+      return drawn;
     }
     var uid = pl.deck.pop();
     st.inst[uid].zone = 'hand';
     pl.hand.push(uid);
+    drawn.push(uid);
     if (!silent) {
       pl.drewThisTurn++;
       // Plica: enemies drawing cards lose 1 sanity
@@ -410,8 +412,10 @@ function drawCards(st, pi, n, silent) {
   }
   if (!silent) {
     log(st, st.players[pi].name + ' draws ' + n + ' card' + (n > 1 ? 's' : '') + '.');
+    st.lastDrawn = { player: pi, uids: drawn };
     scanTrap(st, 'draw', pi);
   }
+  return drawn;
 }
 
 /* ---------------- Phases --------------------------------------------------- */
