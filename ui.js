@@ -47,7 +47,7 @@ function cardDef(id) {
   for (var i = 0; i < DATA.cards.length; i++) if (DATA.cards[i].id === id) return DATA.cards[i];
   return null;
 }
-function imgFor(uid) { return DATA.imgDir + '/' + S.inst[uid].img; }
+function imgFor(uid) { var it = S.inst[uid]; return DATA.imgDir + '/' + (it.img || cardDef(it.def).img); }
 function imgForDef(id) { return DATA.imgDir + '/' + cardDef(id).img; }
 function cname(uid) { var d = Dd(uid); return d.name; }
 
@@ -64,6 +64,7 @@ function boot() {
   hideLoader();
 }
 function newMatch() {
+  setupDone = false; blockSel = null;
   var decks = [DATA.decks[deckChoice[0]].cards.slice(), DATA.decks[deckChoice[1]].cards.slice()];
   S = E.newGame(decks, { mode: mode, names: [DATA.decks[deckChoice[0]].name, DATA.decks[deckChoice[1]].name] });
   if (mode === 'ai' && AI.mulliganDecision(S, 1)) E.mulligan(S, 1);
@@ -88,7 +89,9 @@ function renderSetup() {
   el('board').innerHTML = html;
   el('btn-mulligan').onclick = function () { E.mulligan(S, p); renderSetup(); };
   el('btn-keep').onclick = function () {
-    if (p === 0) renderSetup2(); else { E.startGame(S); refresh(); }
+    // vs AI: the AI mulligans silently (decided in newMatch) — the human
+    // never sees or confirms the AI's hand. Hotseat still shows both.
+    if (p === 0 && mode === 'hotseat') renderSetup2(); else { E.startGame(S); refresh(); }
   };
   bindCardZoom();
 }
@@ -292,6 +295,14 @@ function zoomCard(src) {
 }
 function closeZoom() { el('zoom').style.display = 'none'; }
 
+function attackWhyNot(uid) {
+  var it = S.inst[uid];
+  if (it.zone !== 'board' || it.feral) return 'It\'s feral — re-leash it during your Main phase.';
+  if (it.justEntered) return 'Summoning sickness — it just entered play this turn.';
+  if (E.effPower(S, uid) <= 0) return 'It has 0 power and cannot attack.';
+  return 'It cannot attack right now.';
+}
+
 function onCardClick(uid, zone) {
   if (S.winner) return;
   var me = meIndex();
@@ -313,20 +324,38 @@ function onCardClick(uid, zone) {
     var it = S.inst[uid], di = defenderIndex();
     var canDeclare = S.active === me && (mode === 'ai' || !declaringDone);
     var canDefend = S.attackers.length && (mode === 'ai' ? S.active === aiIdx : declaringDone);
-    if (canDeclare && it.controller === me && Dd(uid).type === 'Abomination' && E.canAttack(S, uid)) {
-      var r = E.declareAttacker(S, me, uid, { kind: 'player', player: 1 - me });
-      if (!r.ok) return toast(r.error);
-      return afterAction();
-    }
-    if (canDefend && it.controller === di) {
-      var atk = S.attackers.filter(function (a) { return a.uid === uid; })[0];
-      if (atk && blockSel && E.canBlock(S, blockSel)) {
-        var r2 = E.declareBlocker(S, di, blockSel, uid);
-        blockSel = null;
-        if (!r2.ok) return toast(r2.error);
+    if (canDeclare && it.controller === me && Dd(uid).type === 'Abomination') {
+      // toggle: click a declared attacker to stand it down
+      var already = S.attackers.some(function (a) { return a.uid === uid; });
+      if (already) {
+        var ru = E.undeclareAttacker(S, me, uid);
+        if (!ru.ok) return toast(ru.error);
         return afterAction();
       }
-      if (!atk && E.canBlock(S, uid)) { blockSel = uid; toast('Blocker selected — now click an attacker.'); refresh(); return; }
+      if (E.canAttack(S, uid)) {
+        var r = E.declareAttacker(S, me, uid, { kind: 'player', player: 1 - me });
+        if (!r.ok) return toast(r.error);
+        return afterAction();
+      }
+      return toast(attackWhyNot(uid));
+    }
+    if (canDefend) {
+      // 1. click one of your own creatures to select it as the blocker
+      if (it.controller === di && E.canBlock(S, uid)) {
+        blockSel = uid;
+        toast('Blocker selected — now click an attacker.');
+        refresh(); return;
+      }
+      // 2. click an attacker to assign the selected blocker to it
+      if (it.controller === S.active && blockSel) {
+        var atk = S.attackers.filter(function (a) { return a.uid === uid; })[0];
+        if (atk && E.canBlock(S, blockSel)) {
+          var r2 = E.declareBlocker(S, di, blockSel, uid);
+          blockSel = null;
+          if (!r2.ok) return toast(r2.error);
+          return afterAction();
+        }
+      }
     }
   }
   openDetail(uid, zone);
@@ -550,7 +579,7 @@ function onResolveCombat() {
 function afterAction() {
   closeDetail();
   targeting = null;
-  if (!S || S.phase !== 'offense') declaringDone = false;
+  if (!S || S.phase !== 'offense') { declaringDone = false; blockSel = null; }
   if (S.winner) return refresh();
   renderPending();
   if (S.pending && S.pending.player === meIndex()) { refresh(); return; } // modal up, wait
@@ -571,7 +600,16 @@ function aiStep() {
   if (!S || S.winner || S.active !== aiIdx) return;
   if (S.phase === 'draw') E.nextPhase(S);
   else if (S.phase === 'upkeep') { AI.upkeep(S, aiIdx); E.nextPhase(S); }
-  else if (S.phase === 'main') { AI.main(S, aiIdx); E.nextPhase(S); }
+  else if (S.phase === 'main') {
+    var played = AI.main(S, aiIdx) || [];
+    E.nextPhase(S);
+    // the AI's whole main phase resolves instantly — summarize what it did
+    // (and what it paid) so its plays aren't silent
+    if (played.length && !S.winner) {
+      var total = played.reduce(function (n, p) { return n + p.cost; }, 0);
+      toast('AI played ' + played.map(function (p) { return p.name; }).join(', ') + ' (−' + total + '◈).');
+    }
+  }
   else if (S.phase === 'offense') { AI.declareAttacks(S, aiIdx); }
   else if (S.phase === 'end') { AI.discardDown(S, aiIdx); E.nextPhase(S); }
   if (S.pending && S.pending.player === aiIdx) AI.decide(S);

@@ -1134,6 +1134,16 @@ MYTHOS.declareBlocker = function (st, pi, uid, attackerUid) {
   return { ok: true };
 };
 
+MYTHOS.undeclareAttacker = function (st, pi, uid) {
+  if (st.phase !== 'offense' || st.active !== pi) return { ok: false, error: 'Not your offense.' };
+  var i = st.attackers.findIndex(function (a) { return a.uid === uid; });
+  if (i < 0) return { ok: false, error: 'Not attacking.' };
+  st.attackers.splice(i, 1);
+  delete st.blockers[uid]; // any blocker assigned to it stands down too
+  log(st, cname(st, uid) + ' stands down.');
+  return { ok: true };
+};
+
 MYTHOS.resolveCombat = function (st) {
   if (st.phase !== 'offense') return { ok: false, error: 'Not offense.' };
   if (st.pending) return { ok: false, error: 'Resolve pending decision first.' };

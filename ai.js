@@ -37,7 +37,7 @@ AI.upkeep = function (st, pi) {
   });
 };
 
-function tryPlay(st, pi, uid, extra) {
+function tryPlay(st, pi, uid, extra, played) {
   var chk = E.canPlay(st, pi, uid);
   if (!chk.ok) return false;
   var opts = extra || {};
@@ -63,11 +63,13 @@ function tryPlay(st, pi, uid, extra) {
     opts.target = tg[0];
   }
   var r = E.playCard(st, pi, uid, opts);
+  if (r.ok && played) played.push({ name: Dd(uid, st).name, cost: chk.cost });
   if (st.pending && st.pending.player === pi) AI.decide(st);
   return r.ok;
 }
 
 AI.main = function (st, pi) {
+  var played = []; // cards played this main phase (for UI summaries)
   var guard = 0, acted = true;
   while (acted && guard++ < 40 && !st.winner) {
     acted = false;
@@ -96,7 +98,7 @@ AI.main = function (st, pi) {
         }
       }
       var r = E.performRitual(st, pi, hand[i], opts);
-      if (r.ok) acted = true;
+      if (r.ok) { acted = true; played.push({ name: Dd(hand[i], st).name, cost: info.cost }); }
       if (st.pending && st.pending.player === pi) AI.decide(st);
     }
     if (acted || st.winner) continue;
@@ -104,7 +106,7 @@ AI.main = function (st, pi) {
     var chars = hand.filter(function (u) { return Dd(u, st).type === 'Character'; })
       .sort(function (a, b) { return E.playCost(st, pi, st.inst[a].def) - E.playCost(st, pi, st.inst[b].def); });
     for (var c = 0; c < chars.length && !acted; c++) {
-      if (afford(st, pi, E.playCost(st, pi, st.inst[chars[c]].def)) && tryPlay(st, pi, chars[c])) acted = true;
+      if (afford(st, pi, E.playCost(st, pi, st.inst[chars[c]].def)) && tryPlay(st, pi, chars[c], null, played)) acted = true;
     }
     if (acted) continue;
     // 3. locations / artifacts / effects
@@ -112,7 +114,7 @@ AI.main = function (st, pi) {
       var t = Dd(u, st).type; return t === 'Location' || t === 'Artifact' || t === 'Effect';
     }).sort(function (a, b) { return E.playCost(st, pi, st.inst[a].def) - E.playCost(st, pi, st.inst[b].def); });
     for (var q = 0; q < perm.length && !acted; q++) {
-      if (afford(st, pi, E.playCost(st, pi, st.inst[perm[q]].def)) && tryPlay(st, pi, perm[q])) acted = true;
+      if (afford(st, pi, E.playCost(st, pi, st.inst[perm[q]].def)) && tryPlay(st, pi, perm[q], null, played)) acted = true;
     }
     if (acted) continue;
     // 4. traps (max 2 set)
@@ -120,7 +122,10 @@ AI.main = function (st, pi) {
       var traps = hand.filter(function (u) { return Dd(u, st).type === 'Trap'; });
       for (var t2 = 0; t2 < traps.length && !acted; t2++) {
         var tc = E.playCost(st, pi, st.inst[traps[t2]].def);
-        if (afford(st, pi, tc)) { if (E.setTrap(st, pi, traps[t2]).ok) acted = true; }
+        if (afford(st, pi, tc) && E.setTrap(st, pi, traps[t2]).ok) {
+          acted = true;
+          played.push({ name: Dd(traps[t2], st).name + ' (trap set)', cost: tc });
+        }
       }
     }
     if (acted) continue;
@@ -131,7 +136,7 @@ AI.main = function (st, pi) {
       return ((db.power || 0) / Math.max(1, E.playCost(st, pi, db.id))) - ((da.power || 0) / Math.max(1, E.playCost(st, pi, da.id)));
     });
     for (var b2 = 0; b2 < abs.length && !acted; b2++) {
-      if (afford(st, pi, E.playCost(st, pi, st.inst[abs[b2]].def)) && tryPlay(st, pi, abs[b2])) acted = true;
+      if (afford(st, pi, E.playCost(st, pi, st.inst[abs[b2]].def)) && tryPlay(st, pi, abs[b2], null, played)) acted = true;
     }
     if (acted) continue;
     // 6. actions
@@ -144,7 +149,7 @@ AI.main = function (st, pi) {
       if (id === 59) {                                                  // Downsizing
         var tg2 = E.legalTargets(st, pi, 'enemy_char_le2');
         if (!tg2.length) continue;
-        if (tryPlay(st, pi, hand[a2], { target: tg2[0] })) acted = true;
+        if (tryPlay(st, pi, hand[a2], { target: tg2[0] }, played)) acted = true;
         continue;
       }
       if (id === 45) {                                                  // PIP: heal most damaged / buff
@@ -152,10 +157,10 @@ AI.main = function (st, pi) {
           return (st.inst[x].psan / st.inst[x].maxPsan) - (st.inst[y].psan / st.inst[y].maxPsan);
         });
         if (!mine.length) continue;
-        if (tryPlay(st, pi, hand[a2], { target: mine[0] })) acted = true;
+        if (tryPlay(st, pi, hand[a2], { target: mine[0] }, played)) acted = true;
         continue;
       }
-      if (tryPlay(st, pi, hand[a2])) acted = true;
+      if (tryPlay(st, pi, hand[a2], null, played)) acted = true;
     }
     if (acted) continue;
     // 7. activated abilities
@@ -189,6 +194,7 @@ AI.main = function (st, pi) {
       if (cs2.length && st.players[pi].sanity > 4 && E.releash(st, pi, ferals[f], cs2[0]).ok) acted = true;
     }
   }
+  return played;
 };
 
 AI.declareAttacks = function (st, pi) {
