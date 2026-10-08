@@ -4,7 +4,15 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MYTHOS: Hostile Takeover — Playable v1</title>
-<link rel="stylesheet" href="style.css?v=603984d1">
+<meta property="og:title" content="MYTHOS: Hostile Takeover — Play the Beta">
+<meta property="og:description" content="A horror card battler where middle management is literal. Play the free beta in your browser — no download.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://justwiggleit.github.io/sturdy-eureka/">
+<meta property="og:image" content="https://justwiggleit.github.io/sturdy-eureka/assets/cards/001.webp">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="MYTHOS: Hostile Takeover — Play the Beta">
+<meta name="twitter:description" content="A horror card battler where middle management is literal. Play free in your browser.">
+<link rel="stylesheet" href="style.css?v=191eda61">
 <script>
 /* Early error trap: runs before game scripts. Any load failure surfaces the
    loader's Report button instead of a dead page. */
@@ -133,17 +141,17 @@ window.addEventListener('unhandledrejection', function (e) {
   </div>
 </div>
 
-<script src="data.js?v=603984d1"></script>
-<script src="engine.js?v=603984d1"></script>
-<script src="ai.js?v=603984d1"></script>
-<script src="net.js?v=603984d1"></script>
-<script src="ui.js?v=603984d1"></script>
+<script src="data.js?v=191eda61"></script>
+<script src="engine.js?v=191eda61"></script>
+<script src="ai.js?v=191eda61"></script>
+<script src="net.js?v=191eda61"></script>
+<script src="ui.js?v=191eda61"></script>
 <!-- Firebase (identity, collections, stats). Fails soft to offline mode. -->
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-<script src="firebase-config.js?v=603984d1"></script>
-<script src="firebase.js?v=603984d1"></script>
+<script src="firebase-config.js?v=191eda61"></script>
+<script src="firebase.js?v=191eda61"></script>
 <script>
   if (window.MYTHOS_FIREBASE && window.MYTHOS_FIREBASE_CONFIG) {
     window.MYTHOS_FIREBASE.init(window.MYTHOS_FIREBASE_CONFIG);
