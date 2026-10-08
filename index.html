@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MYTHOS: Hostile Takeover — Playable v1</title>
-<link rel="stylesheet" href="style.css?v=289a3599">
+<link rel="stylesheet" href="style.css?v=e4125949">
 <script>
 /* Early error trap: runs before game scripts. Any load failure surfaces the
    loader's Report button instead of a dead page. */
@@ -70,14 +70,14 @@ window.addEventListener('unhandledrejection', function (e) {
       <li>Each player starts at <b>40 sanity</b> — it's your life <i>and</i> your currency.</li>
       <li>Win by breaking the enemy to 0 sanity, completing <b>3 rituals</b>, or decking them out.</li>
       <li>Turn: <b>Draw → Upkeep → Main → Attack → Defend → Resolve → End</b>. Use <b>Next phase →</b> to advance.</li>
-      <li><b>Main:</b> click a card in hand for Play / Set trap / Ritual / Ability options — or tap the <b>▶</b> button to play it instantly.</li>
+      <li><b>Main:</b> click a card in hand for Play / Set trap / Ritual / Ability options — tap the <b>▶</b> button to play it instantly, or <b>long-press and drag</b> it to your field.</li>
       <li><b>Upkeep:</b> pay each abomination or it goes <b>feral</b> and eats <i>your</i> sanity.</li>
       <li><b>Attack:</b> click your abominations to declare attackers (click again to stand down), then <b>Next phase →</b>.</li>
       <li><b>Defend:</b> the defender clicks one of their creatures, then the attacker it blocks, then <b>Next phase →</b>.</li>
       <li><b>Resolve:</b> hit <b>⚔ Resolve combat</b> to apply damage and outcomes.</li>
       <li><b>Characters</b> never attack but can block. At 0 personal sanity they <b>burn out</b> — prime ritual fuel.</li>
       <li><b>Rituals</b> need a ritual site (Altar/Grove) + a burned-out character sacrificed. One per turn.</li>
-      <li><b>Double-click</b> any card image to zoom it. <b>Long-press</b> a card to flip it over.</li>
+      <li><b>Double-click</b> any card image to zoom it. <b>Long-press and drag</b> a hand card to your field to play it, or to the discard pile. Use the <b>Flip</b> button in a card's detail view to turn it over.</li>
     </ul>
   </details>
   <p class="foot">v1 prototype — rules simplifications listed in README.md · art: the MYTHOS 060 set</p>
@@ -122,17 +122,28 @@ window.addEventListener('unhandledrejection', function (e) {
 
 <div id="toast" style="display:none"></div>
 
-<script src="data.js?v=289a3599"></script>
-<script src="engine.js?v=289a3599"></script>
-<script src="ai.js?v=289a3599"></script>
-<script src="net.js?v=289a3599"></script>
-<script src="ui.js?v=289a3599"></script>
+<div id="popup" style="display:none">
+  <div class="modal popup-modal">
+    <button id="popup-close" class="x">✕</button>
+    <div id="popup-msg"></div>
+    <div class="popup-btns">
+      <button id="popup-info">ⓘ Info</button>
+      <button id="popup-ok">OK</button>
+    </div>
+  </div>
+</div>
+
+<script src="data.js?v=e4125949"></script>
+<script src="engine.js?v=e4125949"></script>
+<script src="ai.js?v=e4125949"></script>
+<script src="net.js?v=e4125949"></script>
+<script src="ui.js?v=e4125949"></script>
 <!-- Firebase (identity, collections, stats). Fails soft to offline mode. -->
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-<script src="firebase-config.js?v=289a3599"></script>
-<script src="firebase.js?v=289a3599"></script>
+<script src="firebase-config.js?v=e4125949"></script>
+<script src="firebase.js?v=e4125949"></script>
 <script>
   if (window.MYTHOS_FIREBASE && window.MYTHOS_FIREBASE_CONFIG) {
     window.MYTHOS_FIREBASE.init(window.MYTHOS_FIREBASE_CONFIG);

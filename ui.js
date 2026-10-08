@@ -68,11 +68,16 @@ function boot() {
   el('auth-guest').onclick = function (e) { e.preventDefault(); closeAuthModal(); };
   el('auth-email').onkeydown = function (e) { if (e.key === 'Enter') submitAuth(); };
   el('auth-pass').onkeydown = function (e) { if (e.key === 'Enter') submitAuth(); };
+  // pop-up wiring
+  el('popup-info').onclick = togglePopupInfo;
   if (window.MYTHOS_FIREBASE) window.MYTHOS_FIREBASE.onReady(refreshMemberBadge);
   hideLoader();
 }
 function newMatch() {
   setupDone = false; blockSel = null;
+  seenPhasePopups = {}; lastPhaseKey = null;
+  drawQueue.length = 0; drawAnimating = false;
+  closePopup();
   var decks = [DATA.decks[deckChoice[0]].cards.slice(), DATA.decks[deckChoice[1]].cards.slice()];
   S = E.newGame(decks, { mode: mode, names: [DATA.decks[deckChoice[0]].name, DATA.decks[deckChoice[1]].name] });
   if (mode === 'ai' && AI.mulliganDecision(S, 1)) E.mulligan(S, 1);
@@ -190,7 +195,7 @@ function renderSetup() {
     // never sees or confirms the AI's hand. Hotseat still shows both.
     if (p === 0 && mode === 'hotseat') renderSetup2(); else { E.startGame(S); refresh(); }
   };
-  bindLongPress(el('board'));
+  bindDrag(el('board'));
   bindCardZoom();
 }
 function setupPlayer() { return setupDone ? 1 : 0; }
@@ -208,6 +213,7 @@ function refresh() {
   renderBoard();
   renderLog();
   renderPending();
+  maybePhasePopup();
   maybeAI();
 }
 
@@ -256,8 +262,8 @@ function playerZoneHTML(pi, isFoe) {
   h += '<div class="phead"><b>' + esc(pl.name) + '</b>' +
     ' <span class="sanity">◈ ' + pl.sanity + ' sanity</span>' +
     ' <span class="deckpile" title="Deck: ' + pl.deck.length + ' cards"><img class="dpile-img" src="' + DATA.cardBack + '" alt="deck"><span class="dpile-count">' + pl.deck.length + '</span></span>' +
-    ' <span class="counts">Hand ' + (isFoe ? '🂠×' + pl.hand.length : pl.hand.length) +
-    ' · Discard ' + pl.discard.length + '</span>' +
+    ' <span class="discardpile" title="Discard pile: ' + pl.discard.length + ' cards"><span class="dpile-label">🗑</span><span class="dpile-count">' + pl.discard.length + '</span></span>' +
+    ' <span class="counts">Hand ' + (isFoe ? '🂠×' + pl.hand.length : pl.hand.length) + '</span>' +
     (pl.ritualsDone.length ? ' <span class="rituals">☽ ' + pl.ritualsDone.length + '/3</span>' : '') +
     (pl.shield ? ' <span class="shield">🛡' + pl.shield + '</span>' : '') + '</div>';
   // ---- the playing field: a distinct, labeled zone (interactive in every phase)
@@ -300,8 +306,8 @@ function statLine(uid) {
 }
 
 /* 3D flip-card wrapper: front face = card art, back face = card back.
-   Flip state persists in `flipped` across re-renders. Flipping is a long-press
-   (500ms) on the card — no buttons, so tap/double-tap keep their meanings.
+   Flip state persists in `flipped` across re-renders. Flip via the Flip
+   button in the card detail modal; tap opens detail, double-tap zooms.
    actionHTML: optional overlay (e.g. the quick-play button on hand cards). */
 function flipWrap(uid, zone, frontHTML, extraCls, actionHTML) {
   return '<div class="card3d ' + extraCls + (flipped[uid] ? ' flipped' : '') + '" data-uid="' + uid + '" data-zone="' + zone + '">' +
@@ -317,26 +323,40 @@ function toggleFlip(uid) {
   var card = document.querySelector('.card3d[data-uid="' + uid + '"]');
   if (card) card.classList.toggle('flipped', !!flipped[uid]);
 }
-/* Long-press (500ms) flips a card. The press that flips sets
-   suppressNextClick so the release-click never selects/plays. The quick-play
-   button opts out of long-press entirely (tap = play, never flip). */
+/* ---------------- drag & drop (long-press to drag) ----------------
+ * Long-press (500ms, touch or mouse) on one of your cards enters DRAG MODE:
+ * the card lifts and follows the pointer. Drop targets highlight while
+ * dragging: your FIELD (plays the card — same rules as the ▶ button) and
+ * your DISCARD pile (discards — only when legal). Release elsewhere cancels.
+ * The press that starts a drag sets suppressNextClick so the release-click
+ * never selects/plays/opens the card. Buttons (▶, upkeep, etc.) opt out. */
 var suppressNextClick = false;
-function bindLongPress(root) {
+var dragState = null; // {uid, zone, ghost, src}
+
+function isDraggable(uid, zone) {
+  if (!S || S.winner) return false;
+  var me = meIndex(), it = S.inst[uid];
+  if (!it) return false;
+  if (zone === 'hand') return it.owner === me;
+  if (zone === 'board') return it.controller === me;
+  return false; // detail modal, setup screen, etc.
+}
+
+function bindDrag(root) {
   root.querySelectorAll('.card3d').forEach(function (card) {
-    if (card._lpBound) return;
-    card._lpBound = true;
+    if (card._dragBound) return;
+    card._dragBound = true;
     var uid = card.getAttribute('data-uid');
+    var zone = card.getAttribute('data-zone');
     var timer = null, sx = 0, sy = 0;
-    function overPlayBtn(t) { return t && t.closest && t.closest('[data-play]'); }
+    function onControl(t) { return t && t.closest && t.closest('[data-play], button, a'); }
     function start(x, y, t) {
-      if (overPlayBtn(t)) return; // play button: tap only, never flip
+      if (dragState) return;
+      if (onControl(t)) return;
+      if (!isDraggable(uid, zone)) return;
       sx = x; sy = y;
       clearTimeout(timer);
-      timer = setTimeout(function () {
-        toggleFlip(uid);
-        suppressNextClick = true;
-        if (navigator.vibrate) { try { navigator.vibrate(25); } catch (e) {} }
-      }, 500);
+      timer = setTimeout(function () { beginDrag(uid, zone, card); }, 500);
     }
     function cancel() { clearTimeout(timer); timer = null; }
     function moved(x, y) { return Math.abs(x - sx) > 10 || Math.abs(y - sy) > 10; }
@@ -344,24 +364,129 @@ function bindLongPress(root) {
       var t = e.touches[0]; start(t.clientX, t.clientY, e.target);
     }, { passive: true });
     card.addEventListener('touchmove', function (e) {
-      var t = e.touches[0]; if (moved(t.clientX, t.clientY)) cancel();
+      if (timer && moved(e.touches[0].clientX, e.touches[0].clientY)) cancel();
     }, { passive: true });
     card.addEventListener('touchend', cancel);
     card.addEventListener('touchcancel', cancel);
     card.addEventListener('mousedown', function (e) {
       if (e.button === 0) start(e.clientX, e.clientY, e.target);
     });
-    card.addEventListener('mousemove', function (e) { if (timer && moved(e.clientX, e.clientY)) cancel(); });
+    card.addEventListener('mousemove', function (e) {
+      if (timer && moved(e.clientX, e.clientY)) cancel();
+    });
     card.addEventListener('mouseup', cancel);
     card.addEventListener('mouseleave', cancel);
     card.addEventListener('contextmenu', function (e) { e.preventDefault(); });
   });
 }
+
+function beginDrag(uid, zone, cardEl) {
+  if (dragState || !isDraggable(uid, zone)) return;
+  var rect = cardEl.getBoundingClientRect();
+  var ghost = cardEl.cloneNode(true);
+  ghost.removeAttribute('id');
+  ghost.classList.add('drag-ghost');
+  ghost.classList.remove('just-drew');
+  ghost.style.width = rect.width + 'px';
+  ghost.style.left = rect.left + 'px';
+  ghost.style.top = rect.top + 'px';
+  // strip interactive children from the ghost so it never intercepts input
+  ghost.querySelectorAll('button, a').forEach(function (b) { b.remove(); });
+  document.body.appendChild(ghost);
+  cardEl.classList.add('drag-src');
+  dragState = { uid: uid, zone: zone, ghost: ghost, src: cardEl };
+  document.body.classList.add('dragging');
+  if (navigator.vibrate) { try { navigator.vibrate(30); } catch (e) {} }
+  document.addEventListener('touchmove', docDragMove, { passive: false });
+  document.addEventListener('touchend', docDragEnd);
+  document.addEventListener('touchcancel', docDragCancel);
+  document.addEventListener('mousemove', docDragMove);
+  document.addEventListener('mouseup', docDragEnd);
+}
+function docDragMove(e) {
+  if (!dragState) return;
+  if (e.cancelable) e.preventDefault(); // stop scroll while dragging
+  var x, y;
+  if (e.touches && e.touches.length) { x = e.touches[0].clientX; y = e.touches[0].clientY; }
+  else { x = e.clientX; y = e.clientY; }
+  var g = dragState.ghost;
+  g.style.left = (x - g.offsetWidth / 2) + 'px';
+  g.style.top = (y - g.offsetHeight / 2) + 'px';
+  updateDropHighlight(x, y);
+}
+function docDragEnd(e) {
+  if (!dragState) return;
+  var x, y;
+  if (e.changedTouches && e.changedTouches.length) { x = e.changedTouches[0].clientX; y = e.changedTouches[0].clientY; }
+  else { x = e.clientX; y = e.clientY; }
+  var ds = dragState;
+  cleanupDrag();
+  suppressNextClick = true; // swallow the release click
+  var target = dropTargetAt(x, y);
+  if (target === 'field' && ds.zone === 'hand') {
+    quickPlay(ds.uid); // same rules as the ▶ button
+  } else if (target === 'discard') {
+    discardFromDrag(ds.uid, ds.zone);
+  }
+  // else: released elsewhere — snap back (re-render restores the card)
+}
+function docDragCancel() { cleanupDrag(); suppressNextClick = true; }
+function cleanupDrag() {
+  var ds = dragState;
+  dragState = null;
+  if (ds && ds.ghost.parentNode) ds.ghost.parentNode.removeChild(ds.ghost);
+  if (ds && ds.src) ds.src.classList.remove('drag-src');
+  document.body.classList.remove('dragging');
+  document.querySelectorAll('.drop-over').forEach(function (n) { n.classList.remove('drop-over'); });
+  document.removeEventListener('touchmove', docDragMove);
+  document.removeEventListener('touchend', docDragEnd);
+  document.removeEventListener('touchcancel', docDragCancel);
+  document.removeEventListener('mousemove', docDragMove);
+  document.removeEventListener('mouseup', docDragEnd);
+}
+function pointInRect(x, y, r) {
+  return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+}
+/* Drop targets live in the viewing player's zone ('.pzone.me' — in hotseat
+   that's the active player, matching isDraggable). Field accepts hand cards;
+   the discard pile accepts hand cards (when legal). */
+function dropTargetAt(x, y) {
+  var field = document.querySelector('.pzone.me .field');
+  var pile = document.querySelector('.pzone.me .discardpile');
+  if (pile && pointInRect(x, y, pile.getBoundingClientRect())) return 'discard';
+  if (field && pointInRect(x, y, field.getBoundingClientRect())) return 'field';
+  return null;
+}
+function updateDropHighlight(x, y) {
+  var t = dropTargetAt(x, y);
+  document.querySelectorAll('.pzone.me .field, .pzone.me .discardpile').forEach(function (n) {
+    var isField = n.classList.contains('field');
+    n.classList.toggle('drop-over', (t === 'field' && isField) || (t === 'discard' && !isField));
+  });
+}
+/* Discard legality: hand cards only during end-phase discard-down;
+   board cards have no legal drag-discard in v1 (card effects use their own UI). */
+function discardFromDrag(uid, zone) {
+  var me = meIndex();
+  if (zone === 'hand' && discardMode && S.inst[uid].owner === me) {
+    var nm = cname(uid);
+    E.discard(S, me, uid);
+    if (S.players[me].hand.length <= 7) discardMode = false;
+    afterAction();
+    popUp('Discarded <b>' + esc(nm) + '</b>.', null, { autoDismiss: 2000 });
+    return;
+  }
+  popUp('You can only discard during your <b>end phase</b> (when you hold more than 7 cards) or when a card effect tells you to.', 'end');
+}
+
+/* One-time drag hint (replaces the old flip hint). */
 function showFlipHintOnce() {
   try {
-    if (localStorage.getItem('mythos_flip_hint')) return;
-    localStorage.setItem('mythos_flip_hint', '1');
-    setTimeout(function () { toast('Tip: long-press any card to flip it over.'); }, 1500);
+    if (localStorage.getItem('mythos_drag_hint')) return;
+    localStorage.setItem('mythos_drag_hint', '1');
+    setTimeout(function () {
+      popUp('Tip: <b>long-press</b> a card in your hand, then drag it to your <b>field</b> to play it — or to the <b>discard pile</b>.', 'drag');
+    }, 1500);
   } catch (e) {}
 }
 
@@ -411,19 +536,19 @@ function handCardHTML(uid) {
    detail modal flow. */
 function quickPlay(uid) {
   var me = meIndex(), d = Dd(uid);
-  if (!(S.phase === 'main' && S.active === me)) { toast('Play cards during your Main phase.'); return; }
+  if (!(S.phase === 'main' && S.active === me)) { popUp('Play cards during your <b>Main phase</b>.', 'main'); return; }
   var r;
   if (d.type === 'Trap') {
     r = E.setTrap(S, me, uid);
-    if (!r.ok) toast(r.error);
+    if (!r.ok) popUp(esc(r.error), 'traps');
     return afterAction();
   }
   if (d.type === 'Ritual') { openDetail(uid, 'hand'); return; }
   var c = E.canPlay(S, me, uid);
-  if (!c.ok) { toast(c.error); return; }
+  if (!c.ok) { popUp(esc(c.error), 'main'); return; }
   if (c.need) { openDetail(uid, 'hand'); return; } // target/leash → modal choices
   r = E.playCard(S, me, uid, {});
-  if (!r.ok) toast(r.error);
+  if (!r.ok) popUp(esc(r.error), null);
   afterAction();
 }
 
@@ -467,7 +592,7 @@ function bindBoard() {
   cards.forEach(function (c) {
     c.onclick = function (ev) { ev.stopPropagation(); onCardClick(c.getAttribute('data-uid'), c.getAttribute('data-zone')); };
   });
-  bindLongPress(el('board'));
+  bindDrag(el('board'));
   // quick-play buttons: tap ▶ to play immediately (never flips — long-press opts out)
   el('board').querySelectorAll('[data-play]').forEach(function (b) {
     b.onclick = function (ev) {
@@ -535,15 +660,15 @@ function onCardClick(uid, zone) {
       var already = S.attackers.some(function (a) { return a.uid === uid; });
       if (already) {
         var ru = E.undeclareAttacker(S, me, uid);
-        if (!ru.ok) return toast(ru.error);
+        if (!ru.ok) { popUp(esc(ru.error), 'attack'); return; }
         return afterAction();
       }
       if (E.canAttack(S, uid)) {
         var r = E.declareAttacker(S, me, uid, { kind: 'player', player: 1 - me });
-        if (!r.ok) return toast(r.error);
+        if (!r.ok) { popUp(esc(r.error), 'attack'); return; }
         return afterAction();
       }
-      return toast(attackWhyNot(uid));
+      popUp(esc(attackWhyNot(uid)), 'attack'); return;
     }
   }
   // defend phase: defender clicks own creature to select, then an attacker to assign
@@ -552,7 +677,7 @@ function onCardClick(uid, zone) {
     // 1. click one of the defender's creatures to select it as the blocker
     if (it2.controller === di && E.canBlock(S, uid)) {
       blockSel = uid;
-      toast('Blocker selected — now click an attacker.');
+      popUp('<b>' + esc(cname(uid)) + '</b> selected as blocker — now click an attacker.', 'defend');
       refresh(); return;
     }
     // 2. click an attacker to assign the selected blocker to it
@@ -561,7 +686,7 @@ function onCardClick(uid, zone) {
       if (atk && E.canBlock(S, blockSel)) {
         var r2 = E.declareBlocker(S, di, blockSel, uid);
         blockSel = null;
-        if (!r2.ok) return toast(r2.error);
+        if (!r2.ok) { popUp(esc(r2.error), 'defend'); return; }
         return afterAction();
       }
     }
@@ -578,7 +703,7 @@ function fireTargeted(targetUid) {
     var extra = t.extra || {}; extra.target = targetUid;
     r = E.performRitual(S, me, t.uid, extra);
   }
-  if (!r.ok) toast(r.error);
+  if (!r.ok) popUp(esc(r.error), t.kind === 'ritual' ? 'rituals' : null);
   afterAction();
 }
 
@@ -606,10 +731,11 @@ function openDetail(uid, zone) {
     if (d.type === 'Abomination' && S.phase === 'attack' && S.active === me && E.canAttack(S, uid))
       h += '<button data-m="attack">Attack</button>';
   }
+  h += '<button data-m="flip">🔄 Flip</button>';
   h += '<button data-m="close">Close</button></div></div>';
   el('detail-body').innerHTML = h;
   el('detail').style.display = 'flex';
-  bindLongPress(el('detail-body'));
+  bindDrag(el('detail-body'));
   el('detail-body').querySelectorAll('[data-m]').forEach(function (b) {
     b.onclick = function () { detailAction(b.getAttribute('data-m'), uid, zone); };
   });
@@ -620,21 +746,22 @@ function closeDetail() { el('detail').style.display = 'none'; }
 function detailAction(m, uid, zone) {
   var me = meIndex(), r;
   if (m === 'close') return closeDetail();
-  if (m === 'settrap') { r = E.setTrap(S, me, uid); if (!r.ok) toast(r.error); closeDetail(); return afterAction(); }
+  if (m === 'flip') { toggleFlip(uid); return; } // stay open so they can see both sides
+  if (m === 'settrap') { r = E.setTrap(S, me, uid); if (!r.ok) popUp(esc(r.error), 'traps'); closeDetail(); return afterAction(); }
   if (m === 'play') {
     var c = E.canPlay(S, me, uid);
-    if (!c.ok) { toast(c.error); return; }
+    if (!c.ok) { popUp(esc(c.error), 'main'); return; }
     if (c.need === 'target') { targeting = { kind: 'play', uid: uid, spec: c.targetSpec, label: cname(uid) }; closeDetail(); return refresh(); }
     if (c.need === 'leash' || c.need === 'mole' || c.need === 'boardsplit') return leashModal(uid, c);
     r = E.playCard(S, me, uid, {});
-    if (!r.ok) toast(r.error);
+    if (!r.ok) popUp(esc(r.error), null);
     closeDetail(); return afterAction();
   }
   if (m === 'activate') {
     var ab = E.activatedInfo(S, uid);
     if (ab.target) { targeting = { kind: 'activate', uid: uid, spec: ab.target, label: ab.name }; closeDetail(); return refresh(); }
     r = E.activate(S, me, uid);
-    if (!r.ok) toast(r.error);
+    if (!r.ok) popUp(esc(r.error), null);
     closeDetail(); return afterAction();
   }
   if (m === 'ritual') return ritualModal(uid);
@@ -642,16 +769,16 @@ function detailAction(m, uid, zone) {
     var chars = S.players[me].chars.filter(function (x) {
       return E.freeControl(S, x) >= (Dd(uid).leash || 0);
     });
-    if (!chars.length) { toast('No character with free Control.'); return; }
+    if (!chars.length) { popUp('No character with free Control to leash to.', 'leash'); return; }
     // pick first with room (v1)
     r = E.releash(S, me, uid, chars[0]);
-    if (!r.ok) toast(r.error);
+    if (!r.ok) popUp(esc(r.error), 'leash');
     closeDetail(); return afterAction();
   }
   if (m === 'attack') {
     closeDetail();
     r = E.declareAttacker(S, me, uid, { kind: 'player', player: 1 - me });
-    if (!r.ok) toast(r.error);
+    if (!r.ok) popUp(esc(r.error), 'attack');
     return afterAction();
   }
 }
@@ -660,7 +787,7 @@ function leashModal(uid, chk) {
   var opts = chk.leashOptions;
   if (opts.length === 1 && chk.need !== 'boardsplit') {
     var r = E.playCard(S, meIndex(), uid, { leashTo: opts[0].char });
-    if (!r.ok) toast(r.error);
+    if (!r.ok) popUp(esc(r.error), 'leash');
     closeDetail(); return afterAction();
   }
   var h = '<h3>Leash ' + esc(cname(uid)) + ' to…</h3><div class="dbtns">';
@@ -675,7 +802,7 @@ function leashModal(uid, chk) {
       var i = b.getAttribute('data-i');
       if (i === 'x') { closeDetail(); return; }
       var r = E.playCard(S, meIndex(), uid, { leashTo: opts[+i].char });
-      if (!r.ok) toast(r.error);
+      if (!r.ok) popUp(esc(r.error), 'leash');
       closeDetail(); afterAction();
     };
   });
@@ -683,7 +810,7 @@ function leashModal(uid, chk) {
 
 function ritualModal(uid) {
   var me = meIndex(), info = E.ritualInfo(S, me, uid);
-  if (!info.ok) { toast(info.error); return; }
+  if (!info.ok) { popUp(esc(info.error), 'rituals'); return; }
   var h = '<h3>Perform ' + esc(cname(uid)) + ' (' + info.cost + '◈)</h3>';
   h += '<p>Site: <b>' + esc(cname(info.site)) + '</b></p>';
   h += '<p>Sacrifice which burned-out character?</p><div class="dbtns">';
@@ -698,7 +825,7 @@ function ritualModal(uid) {
       var extra = { sac: info.fuel[+i] };
       if (info.need) {
         var tg = E.legalTargets(S, me, info.targetSpec);
-        if (!tg.length) { toast('No legal target.'); return; }
+        if (!tg.length) { popUp('No legal target for this ritual.', 'rituals'); return; }
         // Tender Offer: pick juiciest; Pivot: first two (v1 simplification)
         extra.target = tg[0];
         if (info.targetSpec === 'any_abom' && tg[1]) extra.target2 = tg[1];
@@ -709,7 +836,7 @@ function ritualModal(uid) {
         if (cs[0]) extra.leashTo = cs[0];
       }
       var r = E.performRitual(S, me, uid, extra);
-      if (!r.ok) toast(r.error);
+      if (!r.ok) popUp(esc(r.error), 'rituals');
       closeDetail(); afterAction();
     };
   });
@@ -768,7 +895,7 @@ function renderPending() {
 /* ---------------- flow ---------------- */
 function onNextPhase() {
   var r = E.nextPhase(S);
-  if (!r.ok) { toast(r.error); return; }
+  if (!r.ok) { popUp(esc(r.error), S.phase || null); return; }
   if (r.tally) toast(r.tally); // stage-end tally: no silent stat changes
   // entering end phase: may need discards
   if (S.phase === 'end' && S.players[S.active].hand.length > 7 && S.active === meIndex()) discardMode = true;
@@ -782,7 +909,7 @@ function onNextPhase() {
 function onResolveCombat() {
   if (mode === 'ai' && S.active === 0 && S.attackers.length) AI.assignBlockers(S, 1);
   var r = E.resolveCombat(S);
-  if (!r.ok) { toast(r.error); return; }
+  if (!r.ok) { popUp(esc(r.error), 'resolve'); return; }
   afterAction();
 }
 
@@ -796,17 +923,69 @@ function afterAction() {
   refresh();
 }
 
-/* Announce drawn cards visibly — no silent draws. Opponent draws stay hidden. */
+/* ---------------- draw animations ----------------
+ * Card backs fly from the drawing player's deck pile to their hand (~600ms),
+ * queued so multiple draws play sequentially. The human's drawn card glows
+ * on landing; opponent draws stay face-down — no identity leaks. */
+var drawQueue = [];
+var drawAnimating = false;
+function uidHash(u) { var h = 0; u = String(u); for (var i = 0; i < u.length; i++) h = (h * 31 + u.charCodeAt(i)) | 0; return Math.abs(h); }
+
 function announceDraws() {
   if (!S || !S.lastDrawn) return;
   var d = S.lastDrawn;
   S.lastDrawn = null;
   if (!d.uids || !d.uids.length) return;
   var isMe = d.player === meIndex();
-  var names = d.uids.map(function (u) { return isMe ? cname(u) : 'a card'; });
-  // de-dupe display for multiples
-  var label = isMe ? names.join(', ') : (d.uids.length + ' card' + (d.uids.length > 1 ? 's' : ''));
-  toast((isMe ? '📥 You draw: ' : '📥 ' + S.players[d.player].name + ' draws ') + label + '.');
+  d.uids.forEach(function (uid) { drawQueue.push({ player: d.player, uid: uid, isMe: isMe }); });
+  pumpDrawQueue();
+}
+function pumpDrawQueue() {
+  if (drawAnimating || !drawQueue.length) return;
+  drawAnimating = true;
+  var d = drawQueue.shift();
+  animateDraw(d, function () {
+    drawAnimating = false;
+    // brief beat before the next card so multiples read as a sequence
+    setTimeout(pumpDrawQueue, 120);
+  });
+}
+function animateDraw(d, done) {
+  try {
+    // '.pzone.me' is always the viewing player's zone; '.pzone.foe' the opponent's.
+    // In hotseat meIndex() === S.active, so the active player's zone carries .me.
+    var zoneSel = d.isMe ? '.pzone.me' : '.pzone.foe';
+    var zone = document.querySelector(zoneSel);
+    var deckImg = zone && zone.querySelector('.deckpile img');
+    var handEl = zone && zone.querySelector('.hand');
+    if (!deckImg || !handEl) { done(); return; }
+    var dr = deckImg.getBoundingClientRect();
+    var hr = handEl.getBoundingClientRect();
+    var fly = document.createElement('div');
+    fly.className = 'draw-fly';
+    var img = document.createElement('img');
+    img.src = DATA.cardBack; img.alt = '';
+    fly.appendChild(img);
+    fly.style.left = (dr.left + dr.width / 2) + 'px';
+    fly.style.top = (dr.top + dr.height / 2) + 'px';
+    document.body.appendChild(fly);
+    // force reflow so the transition runs
+    fly.getBoundingClientRect();
+    var tx = (hr.left + hr.width / 2) - (dr.left + dr.width / 2);
+    var ty = (hr.top + Math.min(hr.height, 90) / 2) - (dr.top + dr.height / 2);
+    fly.style.transform = 'translate(' + tx + 'px,' + ty + 'px) rotate(' + (uidHash(d.uid) % 31 - 15) + 'deg)';
+    setTimeout(function () {
+      fly.remove();
+      if (d.isMe) {
+        var card = document.querySelector('.card3d[data-uid="' + d.uid + '"]');
+        if (card) {
+          card.classList.add('just-drew');
+          setTimeout(function () { card.classList.remove('just-drew'); }, 1500);
+        }
+      }
+      done();
+    }, 650);
+  } catch (e) { done(); }
 }
 
 function maybeAI() {
@@ -822,11 +1001,11 @@ function maybeAI() {
 function aiStep() {
   if (!S || S.winner || S.active !== aiIdx) return;
   if (S.phase === 'draw') { S._aiAtkDone = false; S._aiResDone = false; var t0 = E.nextPhase(S); if (t0.tally) toast(t0.tally); }
-  else if (S.phase === 'upkeep') { AI.upkeep(S, aiIdx); var t1 = E.nextPhase(S); if (!t1.ok) toast(t1.error); else if (t1.tally) toast(t1.tally); }
+  else if (S.phase === 'upkeep') { AI.upkeep(S, aiIdx); var t1 = E.nextPhase(S); if (!t1.ok) popUp(esc(t1.error), 'upkeep'); else if (t1.tally) toast(t1.tally); }
   else if (S.phase === 'main') {
     var played = AI.main(S, aiIdx) || [];
     var t2 = E.nextPhase(S);
-    if (!t2.ok) toast(t2.error); else if (t2.tally) toast(t2.tally);
+    if (!t2.ok) popUp(esc(t2.error), 'main'); else if (t2.tally) toast(t2.tally);
     // the AI's whole main phase resolves instantly — summarize what it did
     // (and what it paid) so its plays aren't silent
     if (played.length && !S.winner) {
@@ -843,10 +1022,10 @@ function aiStep() {
     if (!S._aiResDone) {
       S._aiResDone = true;
       var rr = E.resolveCombat(S);
-      if (!rr.ok) toast(rr.error);
+      if (!rr.ok) popUp(esc(rr.error), 'resolve');
     }
   }
-  else if (S.phase === 'end') { AI.discardDown(S, aiIdx); var t3 = E.nextPhase(S); if (!t3.ok) toast(t3.error); else if (t3.tally) toast(t3.tally); }
+  else if (S.phase === 'end') { AI.discardDown(S, aiIdx); var t3 = E.nextPhase(S); if (!t3.ok) popUp(esc(t3.error), 'end'); else if (t3.tally) toast(t3.tally); }
   if (S.pending && S.pending.player === aiIdx) AI.decide(S);
   refresh();
   // AI defends for itself when the human is the attacker
@@ -856,7 +1035,7 @@ function aiStep() {
   }
   // if AI declared attackers, the human assigns blockers via board clicks, then resolves
   if (S.phase === 'defend' && S.active === aiIdx && S.attackers.length) {
-    toast('Assign your blockers, then continue to Resolve.');
+    popUp('The enemy attacks! <b>Assign your blockers</b>, then continue to Resolve.', 'defend');
   }
 }
 
@@ -873,6 +1052,108 @@ function renderGameOver() {
     '<p>Turns: ' + S.turn + '</p>' +
     '<button onclick="location.reload()">Play again</button></div>';
   renderLog();
+}
+
+/* ---------------- pop-up system: instructional / action text ----------------
+ * popUp(msg, infoKey, opts): modal with message + OK + Info buttons.
+ * Info swaps to a concise rule explanation from RULE_INFO.
+ * During AI turns pop-ups auto-dismiss after 2.5s so fast turns never hang.
+ * opts: {autoDismiss: ms, onOk: fn} */
+var RULE_INFO = {
+  draw: { title: 'Draw phase',
+    text: 'Draw 1 card at the start of your turn. The first player skips their very first draw. If you must draw from an empty deck, you lose — drowned in paperwork.' },
+  upkeep: { title: 'Upkeep & going feral',
+    text: 'Pay each abomination\'s upkeep cost from your sanity. Anything you don\'t pay goes <b>feral</b>: it stops obeying you, can\'t be leashed, and deals its power to YOUR sanity when combat starts. Paying upkeep keeps your workforce loyal.' },
+  main: { title: 'Main phase',
+    text: 'The heart of your turn. Play cards from your hand by paying their sanity cost, set traps face-down, perform one ritual per turn, or use activated abilities on cards you control. Tap ▶ on a card to play it instantly, or long-press and drag it to your field.' },
+  attack: { title: 'Attack',
+    text: 'Click your abominations to declare them as attackers — click again to stand one down. Only abominations attack; characters never attack (but they can block). Summoning-sick abominations (just played this turn) can\'t attack. Then advance to Defend.' },
+  defend: { title: 'Defend & blocking',
+    text: 'The defender assigns blockers: click one of your creatures, then click the attacker it blocks. Characters CAN block even though they can\'t attack. Each blocker stops one attacker. Unblocked attackers deal their power straight to the defending player\'s sanity.' },
+  resolve: { title: 'Resolve combat',
+    text: 'Damage is applied: blocked attackers trade blows with their blockers (power vs. flesh — destroyed at 0 flesh), and unblocked attackers hit the defending player\'s sanity directly. Surviving blockers stay on the field.' },
+  end: { title: 'End phase & discarding',
+    text: 'Discard down to 7 cards in your hand, then your turn ends. You can only discard when the rules say so — during this end-phase discard, or when a card effect tells you to. Dragging a card to the discard pile at any other time won\'t work.' },
+  sanity: { title: 'Sanity',
+    text: 'Your life AND your currency. You start at 40. Card costs are paid from it, combat damage reduces it. At 0 sanity you break and lose the game. Spend it wisely — everything costs a piece of your mind.' },
+  rituals: { title: 'Rituals',
+    text: 'Sacrifice a burned-out character (one at 0 personal sanity) at a ritual site (The Altar or The Grove) to complete a ritual. One ritual per turn. Complete 3 rituals to win the game outright.' },
+  leash: { title: 'Leash',
+    text: 'Abominations must be leashed to a character you control when played. Each character\'s Control stat limits the total leash cost they can hold. An abomination with no leash — or whose upkeep goes unpaid — goes feral.' },
+  traps: { title: 'Traps',
+    text: 'Set face-down during your Main phase by paying their cost. Traps trigger automatically when their condition is met — even on your opponent\'s turn. Your opponent sees that you have traps set, but not what they are.' },
+  mulligan: { title: 'Mulligan',
+    text: 'Once per match, before the game starts, you may shuffle your opening hand back into your deck and draw 7 new cards. No further mulligans — commit to what you get.' },
+  flip: { title: 'Flipping cards',
+    text: 'Cards can be flipped face-down to hide information from your opponent. Open a card\'s detail view (tap it) and use the Flip button. Flipping is cosmetic — it doesn\'t change what the card does.' },
+  drag: { title: 'Drag & drop',
+    text: 'Long-press (hold ½ second) a card in your hand, then drag it. Drop it on <b>your field</b> to play it (same rules as the ▶ button), or on the <b>discard pile</b> to discard it — but only when discarding is legal. Release anywhere else to cancel.' }
+};
+
+var popupTimer = null;
+var popupLastMsg = '';
+var popupInfoKey = null;
+var popupShowingInfo = false;
+
+function isAITurn() { return mode === 'ai' && S && !S.winner && S.active === aiIdx; }
+
+/* Phase instruction pop-ups: first time each phase is entered per match. */
+var seenPhasePopups = {};
+var lastPhaseKey = null;
+var PHASE_INTRO = {
+  draw: 'Draw phase — a card flies from your deck to your hand.',
+  upkeep: 'Upkeep — pay each abomination\'s upkeep, or it goes <b>feral</b>.',
+  main: 'Main phase — play cards, set traps, perform a ritual, use abilities.',
+  attack: 'Attack — click your abominations to declare attackers.',
+  defend: 'Defend — click one of your creatures, then the attacker it blocks.',
+  resolve: 'Resolve — hit <b>⚔ Resolve combat</b> to apply damage and outcomes.',
+  end: 'End phase — discard down to 7 cards, then end your turn.'
+};
+function maybePhasePopup() {
+  if (!S || S.winner) return;
+  var key = S.turn + ':' + S.active + ':' + S.phase;
+  if (key === lastPhaseKey) return;
+  lastPhaseKey = key;
+  if (seenPhasePopups[S.phase] || !PHASE_INTRO[S.phase]) return;
+  seenPhasePopups[S.phase] = true;
+  // During AI turns the pop-up auto-dismisses (see popUp); on the human's
+  // turn it waits for OK. Either way it never blocks the game loop.
+  popUp(PHASE_INTRO[S.phase], S.phase);
+}
+
+function popUp(msg, infoKey, opts) {
+  opts = opts || {};
+  popupLastMsg = msg;
+  popupInfoKey = infoKey || null;
+  popupShowingInfo = false;
+  el('popup-msg').innerHTML = msg;
+  var infoBtn = el('popup-info');
+  infoBtn.style.display = (popupInfoKey && RULE_INFO[popupInfoKey]) ? '' : 'none';
+  infoBtn.textContent = 'ⓘ Info';
+  el('popup-ok').onclick = function () { closePopup(); if (opts.onOk) opts.onOk(); };
+  el('popup-close').onclick = function () { closePopup(); if (opts.onOk) opts.onOk(); };
+  el('popup').style.display = 'flex';
+  clearTimeout(popupTimer);
+  var ms = opts.autoDismiss || (isAITurn() ? 2500 : 0);
+  if (ms) popupTimer = setTimeout(closePopup, ms);
+}
+function closePopup() {
+  clearTimeout(popupTimer);
+  el('popup').style.display = 'none';
+  popupShowingInfo = false;
+}
+function togglePopupInfo() {
+  if (!popupInfoKey || !RULE_INFO[popupInfoKey]) return;
+  var info = RULE_INFO[popupInfoKey];
+  if (!popupShowingInfo) {
+    popupShowingInfo = true;
+    el('popup-msg').innerHTML = '<h3>' + esc(info.title) + '</h3><p>' + info.text + '</p>';
+    el('popup-info').textContent = '← Back';
+  } else {
+    popupShowingInfo = false;
+    el('popup-msg').innerHTML = popupLastMsg;
+    el('popup-info').textContent = 'ⓘ Info';
+  }
 }
 
 function toast(msg) {
