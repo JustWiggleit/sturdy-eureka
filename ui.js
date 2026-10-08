@@ -21,7 +21,7 @@ var flipped = {};             // uid -> true: card is showing its back (persists
 
 /* v2 pre-game config */
 var REPORT_EMAIL = 'trollsquadproductions+technicalissues@gmail.com';
-var WIX_LOGIN_URL = 'https://sites.google.com/view/mythosportal/'; // TODO: point at Wix membership site when built
+var WIX_LOGIN_URL = 'https://thenamelesscompany.wixsite.com/mythos-1/membership';
 var isGuest = false;
 
 function reportIssue(context) {
