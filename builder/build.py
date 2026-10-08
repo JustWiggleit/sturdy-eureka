@@ -13,8 +13,8 @@ Outputs (site/):
     data.js        (cards + decks + asset paths, inlined for file:// support)
     cards.json     (same card data as JSON — for tooling/tests)
     decks.json     (starter deck lists)
-    assets/cards/001.png ... 060.png
-    assets/card-back.png
+    assets/cards/001.webp ... 060.webp
+    assets/card-back.webp
 """
 import json
 import openpyxl
@@ -22,6 +22,8 @@ import os
 import shutil
 import sys
 from collections import Counter
+
+from PIL import Image
 
 from card_data import MOTHMAN, DECKS
 
@@ -137,23 +139,25 @@ def build(clean=False):
     assert ids == list(range(1, 61)), "card ids not 001-060: %r" % ids
     apply_mothman(cards)
 
-    # images
+    # images (converted to WebP natively; img stores the bare filename because
+    # ui.js prepends DATA.imgDir — a full path here would double the directory)
     missing = []
     for c in cards:
         src = find_image(c)
         if not src:
             missing.append(c["num"] + " " + c["name"])
             continue
-        dst = os.path.join(SITE, "assets", "cards", c["num"] + ".png")
-        shutil.copyfile(src, dst)
-        c["img"] = "assets/cards/%s.png" % c["num"]
+        dst = os.path.join(SITE, "assets", "cards", c["num"] + ".webp")
+        Image.open(src).convert("RGB").save(dst, "WEBP", quality=82)
+        c["img"] = "%s.webp" % c["num"]
     assert not missing, "missing card images: %r" % missing
-    print("images OK: 60 copied")
+    print("images OK: 60 webp")
 
     # card back
     assert os.path.isfile(CARD_BACK_SRC), "card back not found: %s" % CARD_BACK_SRC
-    shutil.copyfile(CARD_BACK_SRC, os.path.join(SITE, "assets", "card-back.png"))
-    print("card back OK: assets/card-back.png")
+    Image.open(CARD_BACK_SRC).convert("RGB").save(
+        os.path.join(SITE, "assets", "card-back.webp"), "WEBP", quality=82)
+    print("card back OK: assets/card-back.webp")
 
     validate_decks(cards)
 
@@ -163,7 +167,7 @@ def build(clean=False):
         "decks": {k: {"name": v["name"], "desc": v["desc"], "cards": v["cards"]}
                   for k, v in DECKS.items()},
         "imgDir": "assets/cards",
-        "cardBack": "assets/card-back.png",
+        "cardBack": "assets/card-back.webp",
         "version": "1.0.0",
     }
     with open(os.path.join(SITE, "data.js"), "w") as f:
