@@ -226,7 +226,7 @@ function abilityCost(st, pi, charUid, base) {
 
 /* ---------------- Sanity / damage / win ---------------------------------- */
 function checkWin(st) {
-  if (st.winner) return;
+  if (st.winner != null) return;
   for (var p = 0; p < 2; p++) {
     if (st.players[p].sanity <= 0) {
       st.winner = FOE(st, p);
@@ -243,7 +243,7 @@ function checkWin(st) {
 
 // damage to a player's sanity pool (Poison Pill redirect applies)
 function damagePlayer(st, pi, amt, src) {
-  if (amt <= 0 || st.winner) return;
+  if (amt <= 0 || st.winner != null) return;
   var me = st.players[pi], foe = st.players[FOE(st, pi)];
   if (me.shield > 0) {
     var redir = Math.min(amt, me.shield);
@@ -261,13 +261,13 @@ function damagePlayer(st, pi, amt, src) {
 }
 
 function gainSanity(st, pi, amt, src) {
-  if (amt <= 0 || st.winner) return;
+  if (amt <= 0 || st.winner != null) return;
   st.players[pi].sanity += amt;
   log(st, (src ? src + ': ' : '') + st.players[pi].name + ' gains ' + amt + ' sanity (' + st.players[pi].sanity + ').');
 }
 
 function damageChar(st, uid, amt, src) {
-  if (amt <= 0 || st.winner) return;
+  if (amt <= 0 || st.winner != null) return;
   var it = st.inst[uid];
   var wasOut = it.psan <= 0;
   it.psan = Math.max(0, it.psan - amt);
@@ -276,7 +276,7 @@ function damageChar(st, uid, amt, src) {
 }
 
 function healChar(st, uid, amt, src) {
-  if (amt <= 0 || st.winner) return;
+  if (amt <= 0 || st.winner != null) return;
   var it = st.inst[uid];
   if (it.psan >= it.maxPsan && it.psan > 0) return;
   var before = it.psan;
@@ -310,7 +310,7 @@ function onBurnout(st, it) {
 }
 
 function damageAbom(st, uid, amt, src) {
-  if (amt <= 0 || st.winner) return;
+  if (amt <= 0 || st.winner != null) return;
   var it = st.inst[uid];
   it.dmg += amt;
   log(st, (src ? src + ' deals ' : '') + amt + ' damage to ' + cname(st, uid) + ' (' + it.dmg + '/' + effFlesh(st, uid) + ').');
@@ -385,7 +385,7 @@ function drawCards(st, pi, n, silent) {
   var drawn = [];
   for (var i = 0; i < n; i++) {
     if (!pl.deck.length) {
-      if (!st.winner) {
+      if (st.winner == null) {
         st.winner = FOE(st, pi);
         st.winReason = st.players[pi].name + ' must draw from an empty deck — drowned in paperwork. ' + st.players[FOE(st, pi)].name + ' wins.';
         log(st, st.winReason);
@@ -905,7 +905,7 @@ function playCard(st, pi, uid, opts) {
     vexTax(st, pi, opts.target);
   }
   payCost(st, pi, cost, d.name);
-  if (st.winner) return { ok: true, paidAndDied: true };
+  if (st.winner != null) return { ok: true, paidAndDied: true };
   // remove from hand
   pl.hand.splice(pl.hand.indexOf(uid), 1);
 
@@ -1025,7 +1025,7 @@ MYTHOS.activate = function (st, pi, uid, target) {
     if (ab.target !== 'own_discard') vexTax(st, pi, target);
   }
   payCost(st, pi, cost, ab.name);
-  if (st.winner) return { ok: true };
+  if (st.winner != null) return { ok: true };
   log(st, cname(st, uid) + ' uses ' + ab.name + '.');
   it.lastActivatedTurn = st.turn;
   if (it.def === 1 || it.def === 2) healChar(st, target, 2, ab.name);
@@ -1077,7 +1077,7 @@ MYTHOS.performRitual = function (st, pi, uid, opts) {
   }
   if (opts.sac == null || info.fuel.indexOf(opts.sac) < 0) return { ok: false, error: 'Choose a burned-out character to sacrifice.' };
   payCost(st, pi, info.cost, 'ritual: ' + d.name);
-  if (st.winner) return { ok: true };
+  if (st.winner != null) return { ok: true };
   sacrificeChar(st, opts.sac, 'ritual fuel');
   pl.hand.splice(pl.hand.indexOf(uid), 1);
   it.zone = 'discard'; pl.discard.push(uid);
@@ -1158,6 +1158,7 @@ MYTHOS.declareAttacker = function (st, pi, uid, target) {
   if (st.phase !== 'attack' || st.active !== pi) return { ok: false, error: 'Declare attackers in your Attack phase.' };
   if (!canAttack(st, uid)) return { ok: false, error: 'That abomination cannot attack.' };
   if (attackedThis(st, uid)) return { ok: false, error: 'Already attacking.' };
+  if (!target || !target.kind) return { ok: false, error: 'Choose what to attack.' };
   var foe = FOE(st, pi);
   if (target.kind === 'player' && target.player !== foe) return { ok: false, error: 'Attack the enemy.' };
   if (target.kind === 'char') {

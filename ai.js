@@ -71,7 +71,7 @@ function tryPlay(st, pi, uid, extra, played) {
 AI.main = function (st, pi) {
   var played = []; // cards played this main phase (for UI summaries)
   var guard = 0, acted = true;
-  while (acted && guard++ < 40 && !st.winner) {
+  while (acted && guard++ < 40 && st.winner == null) {
     acted = false;
     var hand = handOf(st, pi);
     // 1. rituals
@@ -101,7 +101,7 @@ AI.main = function (st, pi) {
       if (r.ok) { acted = true; played.push({ name: Dd(hand[i], st).name, cost: info.cost }); }
       if (st.pending && st.pending.player === pi) AI.decide(st);
     }
-    if (acted || st.winner) continue;
+    if (acted || st.winner != null) continue;
     // 2. characters, cheapest first
     var chars = hand.filter(function (u) { return Dd(u, st).type === 'Character'; })
       .sort(function (a, b) { return E.playCost(st, pi, st.inst[a].def) - E.playCost(st, pi, st.inst[b].def); });

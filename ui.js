@@ -205,7 +205,7 @@ function renderSetup2() { setupDone = true; renderSetup(); }
 /* ---------------- main render ---------------- */
 function refresh() {
   if (!S) return;
-  if (S.winner) return renderGameOver();
+  if (S.winner != null) return renderGameOver();
   announceDraws();
   if (S.pending && S.pending.player !== undefined && mode === 'ai' && S.pending.player === aiIdx) {
     AI.decide(S); return refresh();
@@ -334,7 +334,7 @@ var suppressNextClick = false;
 var dragState = null; // {uid, zone, ghost, src}
 
 function isDraggable(uid, zone) {
-  if (!S || S.winner) return false;
+  if (!S || S.winner != null) return false;
   var me = meIndex(), it = S.inst[uid];
   if (!it) return false;
   if (zone === 'hand') return it.owner === me;
@@ -637,7 +637,7 @@ function attackWhyNot(uid) {
 
 function onCardClick(uid, zone) {
   if (suppressNextClick) { suppressNextClick = false; return; } // long-press release: swallow
-  if (S.winner) return;
+  if (S.winner != null) return;
   var me = meIndex();
   // pending decision modals handle their own clicks
   if (S.pending && S.pending.player === me) return; // modal is up
@@ -917,7 +917,7 @@ function afterAction() {
   closeDetail();
   targeting = null;
   if (S.phase !== 'defend') blockSel = null;
-  if (S.winner) return refresh();
+  if (S.winner != null) return refresh();
   renderPending();
   if (S.pending && S.pending.player === meIndex()) { refresh(); return; } // modal up, wait
   refresh();
@@ -1008,7 +1008,7 @@ function aiStep() {
     if (!t2.ok) popUp(esc(t2.error), 'main'); else if (t2.tally) toast(t2.tally);
     // the AI's whole main phase resolves instantly — summarize what it did
     // (and what it paid) so its plays aren't silent
-    if (played.length && !S.winner) {
+    if (played.length && S.winner == null) {
       var total = played.reduce(function (n, p) { return n + p.cost; }, 0);
       toast('AI played ' + played.map(function (p) { return p.name; }).join(', ') + ' (−' + total + '◈).');
     }
@@ -1110,7 +1110,7 @@ var PHASE_INTRO = {
   end: 'End phase — discard down to 7 cards, then end your turn.'
 };
 function maybePhasePopup() {
-  if (!S || S.winner) return;
+  if (!S || S.winner != null) return;
   var key = S.turn + ':' + S.active + ':' + S.phase;
   if (key === lastPhaseKey) return;
   lastPhaseKey = key;
@@ -1178,7 +1178,7 @@ document.addEventListener('DOMContentLoaded', function () {
   }
   // inject resolve button into midbar area on each render
   setInterval(function () {
-    if (!S || S.winner) return;
+    if (!S || S.winner != null) return;
     var mid = document.getElementById('midbar');
     if (!mid) return;
     // resolve button appears in midbar during the resolve phase, when combat awaits
