@@ -133,7 +133,7 @@
   "upkeep": null,
   "rules": "Enter: draw a card (night reconnaissance).",
   "flavor": "“The night shift never ends.”",
-  "provisional_stats": true,
+  "provisional_stats": false,
   "img": "008.webp"
  },
  {

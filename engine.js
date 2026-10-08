@@ -964,6 +964,7 @@ MYTHOS.activate = function (st, pi, uid, target) {
   if (!it || it.zone !== 'board' || it.controller !== pi) return { ok: false, error: 'Not your card in play.' };
   if (st.phase !== 'main' || st.active !== pi) return { ok: false, error: 'Abilities in your Main phase.' };
   if (!abilReady(st, uid)) return { ok: false, error: 'That character cannot use abilities right now.' };
+  if (it.lastActivatedTurn === st.turn) return { ok: false, error: 'Already used this turn (once per turn).' };
   var ab = ACTIVATED[it.def];
   if (!ab) return { ok: false, error: 'No activated ability.' };
   var cost = abilityCost(st, pi, uid, ab.cost);
@@ -976,6 +977,7 @@ MYTHOS.activate = function (st, pi, uid, target) {
   payCost(st, pi, cost, ab.name);
   if (st.winner) return { ok: true };
   log(st, cname(st, uid) + ' uses ' + ab.name + '.');
+  it.lastActivatedTurn = st.turn;
   if (it.def === 1 || it.def === 2) healChar(st, target, 2, ab.name);
   else if (it.def === 3) drawCards(st, pi, 2);
   else if (it.def === 4) drawCards(st, pi, 1);

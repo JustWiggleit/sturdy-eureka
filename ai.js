@@ -193,7 +193,10 @@ AI.main = function (st, pi) {
 
 AI.declareAttacks = function (st, pi) {
   var foe = 1 - pi;
-  st.players[pi].aboms.forEach(function (u) {
+  // slice(): declaring an attacker can trigger HR Complaint, and if the AI
+  // sacrifices the attacker the aboms array mutates mid-loop (skipping the
+  // next abomination — e.g. a Paper Jam that must attack).
+  st.players[pi].aboms.slice().forEach(function (u) {
     if (!E.canAttack(st, u)) return;
     // v1: everything goes at the enemy sanity pool
     var r = E.declareAttacker(st, pi, u, { kind: 'player', player: foe });
