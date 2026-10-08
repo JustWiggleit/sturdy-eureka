@@ -17,6 +17,7 @@ var blockSel = null;          // blocker uid picked, awaiting attacker click
 var discardMode = false;
 var declaringDone = false;    // hotseat: attacker finished declaring
 var logOpen = false;
+var flipped = {};             // uid -> true: card is showing its back (persists across re-renders)
 
 /* v2 pre-game config */
 var REPORT_EMAIL = 'trollsquadproductions+technicalissues@gmail.com';
@@ -93,6 +94,7 @@ function renderSetup() {
     // never sees or confirms the AI's hand. Hotseat still shows both.
     if (p === 0 && mode === 'hotseat') renderSetup2(); else { E.startGame(S); refresh(); }
   };
+  bindFlipButtons(el('board'));
   bindCardZoom();
 }
 function setupPlayer() { return setupDone ? 1 : 0; }
@@ -151,7 +153,8 @@ function playerZoneHTML(pi, isFoe) {
   var h = '<div class="pzone' + (isFoe ? ' foe' : ' me') + '">';
   h += '<div class="phead"><b>' + esc(pl.name) + '</b>' +
     ' <span class="sanity">◈ ' + pl.sanity + ' sanity</span>' +
-    ' <span class="counts">Deck ' + pl.deck.length + ' · Hand ' + (isFoe ? '🂠×' + pl.hand.length : pl.hand.length) +
+    ' <span class="deckpile" title="Deck: ' + pl.deck.length + ' cards"><img class="dpile-img" src="' + DATA.cardBack + '" alt="deck"><span class="dpile-count">' + pl.deck.length + '</span></span>' +
+    ' <span class="counts">Hand ' + (isFoe ? '🂠×' + pl.hand.length : pl.hand.length) +
     ' · Discard ' + pl.discard.length + '</span>' +
     (pl.ritualsDone.length ? ' <span class="rituals">☽ ' + pl.ritualsDone.length + '/3</span>' : '') +
     (pl.shield ? ' <span class="shield">🛡' + pl.shield + '</span>' : '') + '</div>';
@@ -191,19 +194,42 @@ function statLine(uid) {
   return parts.join(' · ');
 }
 
+/* 3D flip-card wrapper: front face = card art, back face = card back.
+   Flip state persists in `flipped` across re-renders. The flip button
+   stop-propagates so it never triggers the card's click handler. */
+function flipWrap(uid, zone, frontHTML, extraCls) {
+  return '<div class="card3d ' + extraCls + (flipped[uid] ? ' flipped' : '') + '" data-uid="' + uid + '" data-zone="' + zone + '">' +
+    '<div class="card3d-inner">' +
+      '<div class="card3d-face card3d-front">' + frontHTML + '</div>' +
+      '<div class="card3d-face card3d-back"><img src="' + DATA.cardBack + '" alt="card back"></div>' +
+    '</div>' +
+    '<button class="flipbtn" data-flip="' + uid + '" title="Flip card" aria-label="Flip card">⟲</button>' +
+  '</div>';
+}
+function bindFlipButtons(root) {
+  root.querySelectorAll('[data-flip]').forEach(function (b) {
+    b.onclick = function (ev) {
+      ev.stopPropagation();
+      var uid = b.getAttribute('data-flip');
+      if (flipped[uid]) delete flipped[uid]; else flipped[uid] = true;
+      var card = b.closest('.card3d');
+      if (card) card.classList.toggle('flipped', !!flipped[uid]);
+    };
+  });
+}
+
 function boardCardHTML(uid, isFoe) {
   var it = S.inst[uid], d = Dd(uid);
   var cls = 'bcard' + (it.feral ? ' feral' : '') + (it.psan <= 0 && d.type === 'Character' ? ' burned' : '') +
     (it.asleepUntil >= S.turn ? ' asleep' : '');
   if (S.phase === 'offense' && S.attackers.some(function (a) { return a.uid === uid; })) cls += ' attacking';
   if (S.blockers && Object.keys(S.blockers).some(function (k) { return S.blockers[k] === uid; })) cls += ' blocking';
-  return '<div class="' + cls + '" data-uid="' + uid + '" data-zone="board">' +
-    '<img src="' + imgFor(uid) + '" alt="' + esc(d.name) + '">' +
+  var front = '<img src="' + imgFor(uid) + '" alt="' + esc(d.name) + '">' +
     '<div class="bstats">' + esc(statLine(uid)) + '</div>' +
     (it.feral ? '<div class="flag">FERAL</div>' : '') +
     (it.psan <= 0 && d.type === 'Character' ? '<div class="flag">BURNED OUT</div>' : '') +
-    (it.asleepUntil >= S.turn ? '<div class="flag">ASLEEP</div>' : '') +
-    '</div>';
+    (it.asleepUntil >= S.turn ? '<div class="flag">ASLEEP</div>' : '');
+  return flipWrap(uid, 'board', front, cls);
 }
 
 function charHTML(uid, isFoe) {
@@ -225,8 +251,9 @@ function handCardHTML(uid) {
     else { var c = E.canPlay(S, meIndex(), uid); playable = c.ok; }
     if (d.type === 'Ritual') { var ri = E.ritualInfo(S, meIndex(), uid); playable = ri.ok; }
   }
-  return '<div class="' + cls + (playable ? ' playable' : '') + '" data-uid="' + uid + '" data-zone="hand">' +
-    '<img src="' + imgFor(uid) + '" alt="' + esc(d.name) + '" title="' + esc(d.name) + '"></div>';
+  return flipWrap(uid, 'hand',
+    '<img src="' + imgFor(uid) + '" alt="' + esc(d.name) + '" title="' + esc(d.name) + '">',
+    cls + (playable ? ' playable' : ''));
 }
 
 function meIndex() { return mode === 'ai' ? 0 : S.active; }
@@ -269,6 +296,7 @@ function bindBoard() {
   cards.forEach(function (c) {
     c.onclick = function (ev) { ev.stopPropagation(); onCardClick(c.getAttribute('data-uid'), c.getAttribute('data-zone')); };
   });
+  bindFlipButtons(el('board'));
   var ups = el('board').querySelectorAll('[data-act]');
   ups.forEach(function (b) {
     b.onclick = function (ev) {
@@ -377,7 +405,8 @@ function fireTargeted(targetUid) {
 /* detail modal */
 function openDetail(uid, zone) {
   var d = Dd(uid), it = S.inst[uid], me = meIndex();
-  var h = '<img class="zoomable" src="' + (zone === 'hand' ? imgFor(uid) : imgFor(uid)) + '" alt="' + esc(d.name) + '">';
+  var h = flipWrap(uid, 'detail',
+    '<img class="zoomable" src="' + imgFor(uid) + '" alt="' + esc(d.name) + '">', 'dcard');
   h += '<div class="dinfo"><h3>' + esc(d.name) + '</h3>';
   if (d.title) h += '<div class="dtitle">' + esc(d.title) + '</div>';
   h += '<div class="dtype">' + esc(d.type) + ' · ' + esc(statLine(uid)) + '</div>';
@@ -400,6 +429,7 @@ function openDetail(uid, zone) {
   h += '<button data-m="close">Close</button></div></div>';
   el('detail-body').innerHTML = h;
   el('detail').style.display = 'flex';
+  bindFlipButtons(el('detail-body'));
   el('detail-body').querySelectorAll('[data-m]').forEach(function (b) {
     b.onclick = function () { detailAction(b.getAttribute('data-m'), uid, zone); };
   });

@@ -187,3 +187,43 @@ img.facedown { filter: brightness(.95); }
 }
 .login-btn:hover { background: #2a3f4f; }
 #start-screen .mode-btns { margin-top: 14px; }
+
+/* ---- 3D stage: depth across the table ---- */
+#board { perspective: 1600px; }
+.pzone.foe { transform: rotateX(6deg) scale(.97); transform-origin: 50% 0; }
+.pzone.me { transform: rotateX(-2deg); transform-origin: 50% 100%; }
+
+/* ---- 3D flip cards: front art / back art ---- */
+.card3d { position: relative; display: inline-block; perspective: 800px; }
+.card3d-inner { position: relative; transform-style: preserve-3d; transition: transform .5s ease; }
+.card3d-face { backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+.card3d-face img { display: block; }
+.card3d-back { position: absolute; inset: 0; transform: rotateY(180deg); }
+.card3d-back img { width: 100%; height: 100%; object-fit: cover; }
+.card3d.flipped .card3d-inner { transform: rotateY(180deg); }
+/* hover / selection lift — composes with flip state */
+.bcard:hover .card3d-inner, .hcard:hover .card3d-inner, .dcard:hover .card3d-inner { transform: translateZ(26px); }
+.bcard.flipped:hover .card3d-inner, .hcard.flipped:hover .card3d-inner, .dcard.flipped:hover .card3d-inner { transform: rotateY(180deg) translateZ(26px); }
+.hcard.sel .card3d-inner { transform: translateZ(44px); }
+.hcard.sel.flipped .card3d-inner { transform: rotateY(180deg) translateZ(44px); }
+.bcard.attacking .card3d-inner { transform: translateZ(44px); }
+.bcard.attacking.flipped .card3d-inner { transform: rotateY(180deg) translateZ(44px); }
+/* dedicated flip affordance — never triggers the card click handler */
+.flipbtn {
+  position: absolute; right: 4px; bottom: 4px; z-index: 6;
+  width: 30px; height: 30px; min-width: 30px; padding: 0; margin: 0;
+  border-radius: 50%; font-size: 15px; line-height: 1;
+  background: rgba(10,10,16,.78); border: 1px solid var(--gold); color: var(--gold);
+  opacity: .7; cursor: pointer;
+}
+.card3d:hover .flipbtn, .card3d.flipped .flipbtn { opacity: 1; }
+.flipbtn:hover { background: rgba(30,30,44,.95); }
+/* detail modal flip card sizing */
+.dcard .card3d-front img { width: min(300px, 70vw); border-radius: 10px; }
+/* deck pile visual (face-down stack + count) */
+.deckpile { display: inline-flex; align-items: center; gap: 6px; }
+.dpile-img {
+  width: 38px; border-radius: 5px; border: 1px solid #555; display: block;
+  box-shadow: 2px 2px 0 #1c1c24, 4px 4px 0 #14141a;
+}
+.dpile-count { color: var(--dim); font-size: 13px; }
