@@ -15,6 +15,7 @@ body {
   margin: 0; background: var(--bg); color: var(--ink);
   font-family: Georgia, 'Times New Roman', serif;
   min-height: 100vh;
+  overflow-x: hidden; /* never allow page-level horizontal scroll */
 }
 button {
   font-family: inherit; background: var(--panel2); color: var(--ink);
@@ -324,6 +325,11 @@ img.facedown { filter: brightness(.95); }
 .pzone.me .field-label { color: var(--gold); }
 .pzone.foe .field-label { color: #ff9090; }
 .field-cards { display: flex; flex-direction: column; gap: 6px; }
+/* On narrow screens, allow field cards to wrap horizontally for better space use */
+@media (max-width: 480px) and (orientation: portrait) {
+  .field-cards { flex-direction: row; flex-wrap: wrap; }
+  .char-group { flex-direction: row; align-items: flex-start; }
+}
 /* long-press cards: no text selection / callout while holding */
 .card3d {
   -webkit-user-select: none; user-select: none;
