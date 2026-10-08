@@ -977,6 +977,12 @@ function announceDraws() {
   S.lastDrawn = null;
   if (!d.uids || !d.uids.length) return;
   var isMe = d.player === meIndex();
+  // Always announce the draw visibly — the phase intro popup only shows once
+  // per game, so without this the draw is silent on later turns.
+  if (isMe && S.phase === 'draw') {
+    var names = d.uids.map(function (u) { return cname(u); }).join(', ');
+    toast('Draw phase — you draw: ' + names);
+  }
   d.uids.forEach(function (uid) { drawQueue.push({ player: d.player, uid: uid, isMe: isMe }); });
   pumpDrawQueue();
 }
