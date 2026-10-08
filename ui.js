@@ -224,11 +224,15 @@ function phaseLabel() {
 }
 
 function renderBoard() {
-  var me = S.active, foe = 1 - S.active;
+  // Perspective: zones render from the VIEWING player's side (meIndex),
+  // not the active player's. In vs-AI the human is always player 0, so
+  // their zone is always "YOUR FIELD" even on the AI's turn.
+  var me = meIndex(), foe = 1 - me;
+  var active = S.active;
   var h = '';
   h += '<div id="topbar"><span class="game-title">MYTHOS</span>' +
     '<span id="member-chip" class="member-chip"></span>' +
-    '<span class="turn-info">Turn ' + S.turn + ' · ' + esc(S.players[me].name) + ' · <b>' + phaseLabel() + '</b></span>' +
+    '<span class="turn-info">Turn ' + S.turn + ' · ' + esc(S.players[active].name) + ' · <b>' + phaseLabel() + '</b></span>' +
     '<span class="topbtns"><button id="btn-log">Log</button><button id="btn-restart">Restart</button>' +
     '<button id="btn-next">Next phase →</button></span></div>';
   h += '<div id="phase-banner">' + phaseBanner() + '</div>';
@@ -310,18 +314,33 @@ function statLine(uid) {
    button in the card detail modal; tap opens detail, double-tap zooms.
    actionHTML: optional overlay (e.g. the quick-play button on hand cards). */
 function flipWrap(uid, zone, frontHTML, extraCls, actionHTML) {
+  // Only render the back face when the card is flipped or in the detail
+  // modal (the only place flipping happens). This avoids the face+back
+  // stacking glitch if 3D backface-visibility fails in some browsers.
+  var showBack = flipped[uid] || zone === 'detail';
+  var backHTML = showBack
+    ? '<div class="card3d-face card3d-back"><img src="' + DATA.cardBack + '" alt="card back"></div>'
+    : '';
   return '<div class="card3d ' + extraCls + (flipped[uid] ? ' flipped' : '') + '" data-uid="' + uid + '" data-zone="' + zone + '">' +
     '<div class="card3d-inner">' +
       '<div class="card3d-face card3d-front">' + frontHTML + '</div>' +
-      '<div class="card3d-face card3d-back"><img src="' + DATA.cardBack + '" alt="card back"></div>' +
+      backHTML +
     '</div>' +
     (actionHTML || '') +
   '</div>';
 }
 function toggleFlip(uid) {
   if (flipped[uid]) delete flipped[uid]; else flipped[uid] = true;
-  var card = document.querySelector('.card3d[data-uid="' + uid + '"]');
-  if (card) card.classList.toggle('flipped', !!flipped[uid]);
+  // Re-render the detail modal so the back-face element is correctly
+  // present/absent (we only render it when flipped or in detail view).
+  if (el('detail').style.display !== 'none') {
+    var modalCard = el('detail-body').querySelector('.card3d[data-uid="' + uid + '"]');
+    if (modalCard) openDetail(uid, modalCard.getAttribute('data-zone'));
+  }
+  // Update board instances in place for immediate feedback.
+  document.querySelectorAll('#board .card3d[data-uid="' + uid + '"]').forEach(function (card) {
+    card.classList.toggle('flipped', !!flipped[uid]);
+  });
 }
 /* ---------------- drag & drop (long-press to drag) ----------------
  * Long-press (500ms, touch or mouse) on one of your cards enters DRAG MODE:
@@ -356,10 +375,12 @@ function bindDrag(root) {
       if (!isDraggable(uid, zone)) return;
       sx = x; sy = y;
       clearTimeout(timer);
-      timer = setTimeout(function () { beginDrag(uid, zone, card); }, 500);
+      // 350ms hold (was 500ms — more forgiving for real fingers)
+      timer = setTimeout(function () { beginDrag(uid, zone, card); }, 350);
     }
     function cancel() { clearTimeout(timer); timer = null; }
-    function moved(x, y) { return Math.abs(x - sx) > 10 || Math.abs(y - sy) > 10; }
+    // 16px slop (was 10px — forgiving of natural finger drift during hold)
+    function moved(x, y) { return Math.abs(x - sx) > 16 || Math.abs(y - sy) > 16; }
     card.addEventListener('touchstart', function (e) {
       var t = e.touches[0]; start(t.clientX, t.clientY, e.target);
     }, { passive: true });
@@ -375,7 +396,8 @@ function bindDrag(root) {
       if (timer && moved(e.clientX, e.clientY)) cancel();
     });
     card.addEventListener('mouseup', cancel);
-    card.addEventListener('mouseleave', cancel);
+    // NOTE: no mouseleave cancel — cursor briefly leaving the card during a
+    // hold (common on small cards) must not kill the drag.
     card.addEventListener('contextmenu', function (e) { e.preventDefault(); });
   });
 }
@@ -653,9 +675,15 @@ function onCardClick(uid, zone) {
     return afterAction();
   }
   // attack phase: active player declares attackers (click to toggle)
+  // In attack phase, clicking ANY of your board cards is an attack action —
+  // never fall through to the detail modal (that's what confused playtesters).
   if (S.phase === 'attack' && zone === 'board' && S.active === me) {
     var it = S.inst[uid];
-    if (it.controller === me && Dd(uid).type === 'Abomination') {
+    if (it.controller === me) {
+      if (Dd(uid).type !== 'Abomination') {
+        popUp('Only <b>Abominations</b> attack. Characters hold the line (and fuel rituals).', 'attack');
+        return;
+      }
       // toggle: click a declared attacker to stand it down
       var already = S.attackers.some(function (a) { return a.uid === uid; });
       if (already) {
@@ -942,6 +970,12 @@ function announceDraws() {
 }
 function pumpDrawQueue() {
   if (drawAnimating || !drawQueue.length) return;
+  // Don't play the animation under a modal pop-up — wait until it's dismissed
+  // so the user actually sees the card fly.
+  if (el('popup').style.display !== 'none') {
+    setTimeout(pumpDrawQueue, 300);
+    return;
+  }
   drawAnimating = true;
   var d = drawQueue.shift();
   animateDraw(d, function () {
@@ -1014,8 +1048,14 @@ function aiStep() {
     }
   }
   else if (S.phase === 'attack') {
-    // declare once per attack phase; the human advances with Next phase →
-    if (!S._aiAtkDone) { S._aiAtkDone = true; AI.declareAttacks(S, aiIdx); }
+    // declare once per attack phase, then auto-advance to defend —
+    // the human only acts when THEY are the defender
+    if (!S._aiAtkDone) {
+      S._aiAtkDone = true;
+      AI.declareAttacks(S, aiIdx);
+      var ta = E.nextPhase(S);
+      if (!ta.ok) popUp(esc(ta.error), 'attack'); else if (ta.tally) toast(ta.tally);
+    }
   }
   else if (S.phase === 'defend') { /* AI is the attacker here; the human defends via the UI */ }
   else if (S.phase === 'resolve') {
@@ -1023,6 +1063,11 @@ function aiStep() {
       S._aiResDone = true;
       var rr = E.resolveCombat(S);
       if (!rr.ok) popUp(esc(rr.error), 'resolve');
+      else {
+        // auto-advance to end phase after resolving
+        var tr = E.nextPhase(S);
+        if (!tr.ok) popUp(esc(tr.error), 'resolve'); else if (tr.tally) toast(tr.tally);
+      }
     }
   }
   else if (S.phase === 'end') { AI.discardDown(S, aiIdx); var t3 = E.nextPhase(S); if (!t3.ok) popUp(esc(t3.error), 'end'); else if (t3.tally) toast(t3.tally); }
@@ -1034,9 +1079,13 @@ function aiStep() {
     refresh();
   }
   // if AI declared attackers, the human assigns blockers via board clicks, then resolves
-  if (S.phase === 'defend' && S.active === aiIdx && S.attackers.length) {
+  // (show once per defend phase — not on every aiStep tick)
+  if (S.phase === 'defend' && S.active === aiIdx && S.attackers.length && !S._defendPopupShown) {
+    S._defendPopupShown = true;
     popUp('The enemy attacks! <b>Assign your blockers</b>, then continue to Resolve.', 'defend');
   }
+  // reset the flag when leaving defend phase
+  if (S.phase !== 'defend') S._defendPopupShown = false;
 }
 
 /* resolve button appears in midbar during the resolve phase */
