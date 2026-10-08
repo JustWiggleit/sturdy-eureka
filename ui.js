@@ -206,7 +206,6 @@ function renderSetup2() { setupDone = true; renderSetup(); }
 function refresh() {
   if (!S) return;
   if (S.winner != null) return renderGameOver();
-  announceDraws();
   if (S.pending && S.pending.player !== undefined && mode === 'ai' && S.pending.player === aiIdx) {
     AI.decide(S); return refresh();
   }
@@ -214,6 +213,9 @@ function refresh() {
   renderLog();
   renderPending();
   maybePhasePopup();
+  // Draw animations run AFTER the phase popup is up, so pumpDrawQueue sees it
+  // and waits for dismissal instead of playing underneath it.
+  announceDraws();
   maybeAI();
 }
 
@@ -232,7 +234,7 @@ function renderBoard() {
   var h = '';
   h += '<div id="topbar"><span class="game-title">MYTHOS</span>' +
     '<span id="member-chip" class="member-chip"></span>' +
-    '<span class="turn-info">Turn ' + S.turn + ' · ' + esc(S.players[active].name) + ' · <b>' + phaseLabel() + '</b></span>' +
+    '<span class="turn-info">Turn ' + S.turn + ' · ' + esc(S.players[active].name) + (active === me ? ' (YOU)' : '') + ' · <b>' + phaseLabel() + '</b></span>' +
     '<span class="topbtns"><button id="btn-log">Log</button><button id="btn-restart">Restart</button>' +
     '<button id="btn-next">Next phase →</button></span></div>';
   h += '<div id="phase-banner">' + phaseBanner() + '</div>';
@@ -417,6 +419,8 @@ function beginDrag(uid, zone, cardEl) {
   document.body.appendChild(ghost);
   cardEl.classList.add('drag-src');
   dragState = { uid: uid, zone: zone, ghost: ghost, src: cardEl };
+  // Safety timer: auto-cancel if the drop event is ever lost
+  dragState.safetyTimer = setTimeout(function () { if (dragState) cleanupDrag(); }, 15000);
   document.body.classList.add('dragging');
   if (navigator.vibrate) { try { navigator.vibrate(30); } catch (e) {} }
   document.addEventListener('touchmove', docDragMove, { passive: false });
@@ -456,6 +460,7 @@ function docDragCancel() { cleanupDrag(); suppressNextClick = true; }
 function cleanupDrag() {
   var ds = dragState;
   dragState = null;
+  if (ds && ds.safetyTimer) clearTimeout(ds.safetyTimer);
   if (ds && ds.ghost.parentNode) ds.ghost.parentNode.removeChild(ds.ghost);
   if (ds && ds.src) ds.src.classList.remove('drag-src');
   document.body.classList.remove('dragging');
@@ -466,6 +471,13 @@ function cleanupDrag() {
   document.removeEventListener('mousemove', docDragMove);
   document.removeEventListener('mouseup', docDragEnd);
 }
+// Safety net: a drag can never get permanently stuck. If the drop event is
+// lost (mouse released outside the window, automation glitch, etc.), the
+// drag auto-cancels after 15s. Escape cancels immediately.
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape' && dragState) { cleanupDrag(); suppressNextClick = true; }
+});
+window.addEventListener('blur', function () { if (dragState) cleanupDrag(); });
 function pointInRect(x, y, r) {
   return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
 }
@@ -599,7 +611,7 @@ function midBarHTML() {
     h += '<div class="combat">Attackers: ' + S.attackers.map(function (a) {
       var t = a.target.kind === 'player' ? esc(S.players[a.target.player].name) + "'s sanity" : esc(cname(a.target.uid));
       var blk = S.blockers[a.uid];
-      return '<span class="atk" data-uid="' + a.uid + '">' + esc(cname(a.uid)) + ' → ' + t +
+      return '<span class="atk" data-uid="' + a.uid + '" data-zone="board">' + esc(cname(a.uid)) + ' → ' + t +
         (blk ? ' <b>blocked by ' + esc(cname(blk)) + '</b>' : ' <i>unblocked</i>') + '</span>';
     }).join(' · ') + '</div>';
   }
@@ -749,8 +761,8 @@ function openDetail(uid, zone) {
   var mine = it.controller === me || (zone === 'hand' && it.owner === me);
   if (zone === 'hand' && it.owner === me && S.phase === 'main' && S.active === me) {
     if (d.type === 'Trap') h += '<button data-m="settrap">Set trap (' + d.cost + '◈)</button>';
-    else if (d.type === 'Ritual') { var ri = E.ritualInfo(S, me, uid); h += '<button data-m="ritual"' + (ri.ok ? '' : ' disabled') + '>Perform ritual</button>'; }
-    else { var c = E.canPlay(S, me, uid); h += '<button data-m="play"' + (c.ok ? '' : ' disabled') + '>Play (' + E.playCost(S, me, d.id) + '◈)</button>'; }
+    else if (d.type === 'Ritual') { var ri = E.ritualInfo(S, me, uid); h += '<button data-m="ritual"' + (ri.ok ? '' : ' disabled title="' + esc(ri.error || 'Cannot perform ritual') + '"') + '>Perform ritual</button>' + (ri.ok ? '' : '<div class="btn-why">' + esc(ri.error || '') + '</div>'); }
+    else { var c = E.canPlay(S, me, uid); h += '<button data-m="play"' + (c.ok ? '' : ' disabled title="' + esc(c.error || 'Cannot play now') + '"') + '>Play (' + E.playCost(S, me, d.id) + '◈)</button>' + (c.ok ? '' : '<div class="btn-why">' + esc(c.error || '') + '</div>'); }
   }
   if (zone === 'board' && it.controller === me) {
     var ab = E.activatedInfo(S, uid);

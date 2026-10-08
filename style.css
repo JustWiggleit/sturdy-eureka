@@ -136,6 +136,7 @@ img.facedown { filter: brightness(.95); }
 .drules { font-size: 15px; line-height: 1.45; }
 .dflavor { color: var(--dim); font-style: italic; font-size: 13px; }
 .dbtns { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.btn-why { flex-basis: 100%; font-size: 12px; color: #c99; font-style: italic; margin-top: -2px; }
 .zoom-modal img { max-width: 92vw; max-height: 88vh; border-radius: 10px; }
 
 /* ---- setup / gameover ---- */
